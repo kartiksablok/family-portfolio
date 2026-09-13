@@ -1,0 +1,1378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Family Portfolio</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  /* ── CONFIG ── Replace these before use ───────────────────────── */
+  /* See SETUP section at the bottom of this file                    */
+
+  :root {
+    --ink:      #1a1a1a;
+    --ink2:     #555;
+    --ink3:     #999;
+    --line:     #e8e8e8;
+    --line2:    #d0d0d0;
+    --bg:       #f7f7f5;
+    --card:     #ffffff;
+    --eq:       #2563eb;
+    --debt:     #7c3aed;
+    --gold:     #d97706;
+    --green:    #059669;
+    --red:      #dc2626;
+    --radius:   10px;
+    --mono:     'SF Mono', 'Fira Code', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+
+  /* ── PIN SCREEN ── */
+  #pin-screen {
+    position: fixed; inset: 0;
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000;
+    flex-direction: column;
+    gap: 32px;
+  }
+  .pin-box {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 40px;
+    width: 320px;
+    text-align: center;
+  }
+  .pin-title { font-size: 20px; font-weight: 600; margin-bottom: 6px; }
+  .pin-sub { color: var(--ink3); font-size: 13px; margin-bottom: 28px; }
+  .pin-dots { display: flex; gap: 12px; justify-content: center; margin-bottom: 28px; }
+  .pin-dot {
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid var(--line2);
+    background: transparent;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .pin-dot.filled { background: var(--ink); border-color: var(--ink); }
+  .pin-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .pin-key {
+    height: 52px; border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    font-size: 18px; font-weight: 500;
+    cursor: pointer; transition: background 0.1s;
+  }
+  .pin-key:hover { background: var(--bg); }
+  .pin-key:active { background: var(--line); }
+  .pin-err { color: var(--red); font-size: 12px; min-height: 18px; margin-top: 8px; }
+
+  /* ── LAYOUT ── */
+  #app { display: none; }
+  .topbar {
+    background: var(--card);
+    border-bottom: 1px solid var(--line);
+    padding: 0 24px;
+    display: flex; align-items: center; justify-content: space-between;
+    height: 56px;
+    position: sticky; top: 0; z-index: 100;
+  }
+  .topbar-brand { font-weight: 600; font-size: 15px; letter-spacing: -0.3px; }
+  .topbar-right { display: flex; align-items: center; gap: 16px; }
+  .period-badge {
+    font-size: 11px; color: var(--ink3);
+    background: var(--bg); border: 1px solid var(--line);
+    padding: 3px 10px; border-radius: 20px;
+    font-family: var(--mono);
+  }
+  .lock-btn {
+    font-size: 12px; color: var(--ink3); cursor: pointer;
+    background: none; border: none; padding: 4px;
+  }
+  .lock-btn:hover { color: var(--ink); }
+
+  .tabs {
+    background: var(--card);
+    border-bottom: 1px solid var(--line);
+    padding: 0 24px;
+    display: flex; gap: 0;
+    overflow-x: auto;
+  }
+  .tab {
+    padding: 12px 16px;
+    font-size: 13px; font-weight: 500;
+    color: var(--ink3);
+    border: none; background: none;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+    transition: color 0.15s;
+  }
+  .tab:hover { color: var(--ink); }
+  .tab.active { color: var(--ink); border-bottom-color: var(--ink); }
+
+  .main { padding: 24px; max-width: 900px; margin: 0 auto; }
+
+  /* ── CARDS ── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .card-title {
+    font-size: 12px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--ink3); margin-bottom: 16px;
+  }
+
+  /* ── METRICS ── */
+  .metric-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap: 12px; margin-bottom: 16px; }
+  .metric { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  .metric-label { font-size: 11px; color: var(--ink3); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .metric-value { font-size: 22px; font-weight: 600; font-family: var(--mono); letter-spacing: -0.5px; }
+  .metric-sub { font-size: 11px; color: var(--ink3); margin-top: 4px; }
+
+  /* ── CHART GRID ── */
+  .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  @media (max-width: 600px) { .chart-grid { grid-template-columns: 1fr; } }
+
+  /* ── ASSET LIST ── */
+  .asset-list-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 0; border-bottom: 1px solid var(--line);
+  }
+  .asset-list-row:last-child { border-bottom: none; }
+  .a-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+  .a-name { flex: 1; font-size: 13px; }
+  .a-bar-wrap { width: 80px; }
+  .a-bar-bg { height: 3px; background: var(--line); border-radius: 2px; }
+  .a-bar-fill { height: 3px; border-radius: 2px; }
+  .a-amt { font-size: 12px; font-weight: 600; font-family: var(--mono); min-width: 80px; text-align: right; }
+  .a-pct { font-size: 11px; color: var(--ink3); min-width: 36px; text-align: right; }
+
+  /* ── MEMBER CARDS ── */
+  .member-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap: 12px; margin-bottom: 16px; }
+  .member-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  .m-avatar {
+    width: 36px; height: 36px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 600; margin-bottom: 10px;
+  }
+  .m-name { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+  .m-amt { font-size: 18px; font-weight: 700; font-family: var(--mono); margin-bottom: 4px; letter-spacing: -0.5px; }
+  .m-pct { font-size: 11px; color: var(--ink3); }
+  .m-status { font-size: 11px; margin-top: 6px; }
+  .m-status.ok { color: var(--green); }
+  .m-status.pending { color: var(--ink3); }
+
+  /* ── HISTORY ── */
+  .history-row {
+    display: flex; align-items: center;
+    justify-content: space-between;
+    padding: 9px 0; border-bottom: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .history-row:last-child { border-bottom: none; }
+  .h-date { color: var(--ink3); font-family: var(--mono); font-size: 12px; min-width: 80px; }
+  .h-amt { font-weight: 600; font-family: var(--mono); }
+  .h-change { font-size: 12px; }
+  .h-note { font-size: 11px; color: var(--ink3); }
+  .up { color: var(--green); }
+  .dn { color: var(--red); }
+
+  /* ── FORMS ── */
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 12px; margin-bottom: 16px; }
+  .form-group { display: flex; flex-direction: column; gap: 5px; }
+  .form-label { font-size: 11px; font-weight: 600; color: var(--ink3); text-transform: uppercase; letter-spacing: 0.05em; }
+  select, input[type=number], input[type=text], input[type=password] {
+    font-size: 13px; padding: 8px 10px;
+    border: 1px solid var(--line2); border-radius: 8px;
+    background: var(--card); color: var(--ink); width: 100%;
+    font-family: inherit;
+  }
+  select:focus, input:focus { outline: 2px solid var(--eq); outline-offset: -1px; }
+  .btn {
+    padding: 8px 16px; border-radius: 8px;
+    border: 1px solid var(--line2);
+    background: var(--card); color: var(--ink);
+    font-size: 13px; font-weight: 500;
+    cursor: pointer; font-family: inherit;
+    transition: background 0.1s;
+  }
+  .btn:hover { background: var(--bg); }
+  .btn-primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .btn-primary:hover { background: #333; }
+  .btn-sm { padding: 5px 12px; font-size: 12px; }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+  .err { font-size: 12px; color: var(--red); min-height: 18px; }
+  .ok-msg { font-size: 12px; color: var(--green); min-height: 18px; }
+  code { font-family: var(--mono); font-size: 12px; background: var(--bg); padding: 2px 6px; border-radius: 4px; }
+  .hint { font-size: 11px; color: var(--ink3); margin-top: 6px; }
+
+  /* ── UPLOAD ZONE ── */
+  .upload-zone {
+    border: 1.5px dashed var(--line2); border-radius: var(--radius);
+    padding: 20px; text-align: center; cursor: pointer; margin-bottom: 12px;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .upload-zone:hover { background: #f0f4ff; border-color: var(--eq); }
+  .upload-zone-title { font-size: 13px; font-weight: 500; margin: 8px 0 3px; }
+  .upload-zone-sub { font-size: 12px; color: var(--ink3); }
+
+  /* ── NPS PANEL ── */
+  .nps-panel {
+    background: var(--bg); border-radius: 8px;
+    padding: 12px 14px; margin-top: 10px; display: none;
+  }
+  .nps-panel.show { display: block; }
+  .nps-panel-title { font-size: 11px; font-weight: 600; color: var(--ink3); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+  .nps-slider-row { display: flex; align-items: center; gap: 10px; }
+  .nps-val { font-size: 13px; font-weight: 600; font-family: var(--mono); min-width: 36px; text-align: right; }
+  input[type=range] { flex: 1; }
+  .nps-preview { font-size: 12px; color: var(--ink3); margin-top: 6px; }
+
+  /* ── QUICK FILL ── */
+  .quick-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; align-items: center; }
+  .quick-label { font-size: 11px; color: var(--ink3); margin-right: 4px; }
+
+  /* ── DATA TABLE ── */
+  .data-table-wrap { overflow-x: auto; }
+  .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .data-table th { text-align: left; padding: 6px 8px; color: var(--ink3); font-weight: 600; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  .data-table th.r, .data-table td.r { text-align: right; }
+  .data-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); font-family: var(--mono); }
+  .data-table tr:last-child td { border-bottom: none; }
+  .data-table .total-row td { font-weight: 700; border-top: 2px solid var(--line2); }
+
+  /* ── WARN BANNER ── */
+  .warn-banner {
+    background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;
+    padding: 10px 14px; font-size: 12px; color: #92400e; margin-bottom: 16px;
+  }
+
+  /* ── ADVICE BOX ── */
+  .advice-box {
+    background: #f0f4ff; border: 1px solid #c7d2fe; border-radius: var(--radius);
+    padding: 16px; margin-bottom: 16px;
+  }
+  .advice-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: #1e40af; }
+  .advice-body { font-size: 12px; color: #374151; line-height: 1.6; white-space: pre-wrap; font-family: var(--mono); }
+
+  /* ── LEGEND ── */
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+  .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--ink3); }
+  .legend-dot { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+
+  /* ── SPINNER ── */
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--ink); border-radius: 50%; animation: spin 0.6s linear infinite; vertical-align: middle; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── SETUP NOTICE ── */
+  .setup-notice { background: #fef3c7; border: 1px solid #fcd34d; border-radius: 8px; padding: 14px; font-size: 12px; color: #78350f; margin-bottom: 16px; line-height: 1.6; }
+  .setup-notice strong { font-weight: 700; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════
+     CONFIGURATION — edit these values before using the app
+═══════════════════════════════════════════════════════════ -->
+<script>
+const CONFIG = {
+  PIN: '1947',                          // Change this PIN before sharing
+  SHEET_ID: '1V1GKth1Fs5tyLDOXKZgrjNOXA8daf1aqKFf8KgElv74',
+  API_KEY:  'AIzaSyANN_yiQN0Q-lqUkTPSH7dls5ycf-rV1J4',
+  OAUTH_CLIENT_ID: '923665535688-u0nkkfddk10e6tsf764mgpsj4attughl.apps.googleusercontent.com',
+  SHEET_PORTFOLIO: 'portfolio',         // Tab name for current values
+  SHEET_HISTORY:   'history',          // Tab name for snapshots
+  SHEET_CONFIG:    'config',           // Tab name for NPS % etc
+};
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════
+     PIN SCREEN
+═══════════════════════════════════════════════════════════ -->
+<div id="pin-screen">
+  <div class="pin-box">
+    <div class="pin-title">Family portfolio</div>
+    <div class="pin-sub">Enter PIN to continue</div>
+    <div class="pin-dots" id="pin-dots">
+      <div class="pin-dot" id="pd0"></div>
+      <div class="pin-dot" id="pd1"></div>
+      <div class="pin-dot" id="pd2"></div>
+      <div class="pin-dot" id="pd3"></div>
+    </div>
+    <div class="pin-pad">
+      <button class="pin-key" onclick="pinKey('1')">1</button>
+      <button class="pin-key" onclick="pinKey('2')">2</button>
+      <button class="pin-key" onclick="pinKey('3')">3</button>
+      <button class="pin-key" onclick="pinKey('4')">4</button>
+      <button class="pin-key" onclick="pinKey('5')">5</button>
+      <button class="pin-key" onclick="pinKey('6')">6</button>
+      <button class="pin-key" onclick="pinKey('7')">7</button>
+      <button class="pin-key" onclick="pinKey('8')">8</button>
+      <button class="pin-key" onclick="pinKey('9')">9</button>
+      <button class="pin-key" onclick="pinClear()" style="font-size:13px">⌫</button>
+      <button class="pin-key" onclick="pinKey('0')">0</button>
+      <button class="pin-key" onclick="pinSubmit()" style="font-size:13px">→</button>
+    </div>
+    <div class="pin-err" id="pin-err"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     MAIN APP
+═══════════════════════════════════════════════════════════ -->
+<div id="app">
+  <div class="topbar">
+    <div class="topbar-brand">Family portfolio</div>
+    <div class="topbar-right">
+      <span class="period-badge" id="period-badge">–</span>
+      <button class="lock-btn" onclick="lockApp()">Lock</button>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('overview')">Overview</button>
+    <button class="tab" onclick="switchTab('members')">Members</button>
+    <button class="tab" onclick="switchTab('assets')">Asset classes</button>
+    <button class="tab" onclick="switchTab('debtequity')">Debt / equity</button>
+    <button class="tab" onclick="switchTab('upload')">Upload CAS</button>
+    <button class="tab" onclick="switchTab('manual')">Manual entry</button>
+    <button class="tab" onclick="switchTab('history')">History</button>
+    <button class="tab" onclick="switchTab('advice')">Get advice</button>
+    <button class="tab" onclick="switchTab('setup')" style="color:#d97706">⚙ Setup</button>
+  </div>
+
+  <div class="main">
+    <div id="tab-overview"></div>
+    <div id="tab-members" style="display:none"></div>
+    <div id="tab-assets" style="display:none"></div>
+    <div id="tab-debtequity" style="display:none"></div>
+    <div id="tab-upload" style="display:none"></div>
+    <div id="tab-manual" style="display:none"></div>
+    <div id="tab-history" style="display:none"></div>
+    <div id="tab-advice" style="display:none"></div>
+    <div id="tab-setup" style="display:none"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     JAVASCRIPT
+═══════════════════════════════════════════════════════════ -->
+<script>
+/* ── CONSTANTS ── */
+const MEMBERS = [
+  { id:'kartik', name:'Kartik',  initials:'K', color:'#2563eb', bg:'#dbeafe', tc:'#1e40af' },
+  { id:'spouse', name:'Spouse',  initials:'S', color:'#7c3aed', bg:'#ede9fe', tc:'#4c1d95' },
+  { id:'father', name:'Father',  initials:'F', color:'#059669', bg:'#d1fae5', tc:'#064e3b' },
+  { id:'mother', name:'Mother',  initials:'M', color:'#d97706', bg:'#fef3c7', tc:'#78350f' }
+];
+const ASSET_CLASSES = [
+  { id:'mf_equity',   name:'MF — equity',      color:'#2563eb', type:'equity' },
+  { id:'stocks',      name:'Stocks',            color:'#3b82f6', type:'equity' },
+  { id:'crypto',      name:'Crypto',            color:'#ef4444', type:'equity' },
+  { id:'mf_debt',     name:'MF — debt',         color:'#7c3aed', type:'debt'   },
+  { id:'bonds',       name:'Bonds / NCDs',       color:'#8b5cf6', type:'debt'   },
+  { id:'fd',          name:'FDs / RDs',          color:'#6b7280', type:'debt'   },
+  { id:'epf',         name:'EPF',               color:'#d97706', type:'debt'   },
+  { id:'ppf',         name:'PPF',               color:'#f59e0b', type:'debt'   },
+  { id:'savings',     name:'Savings / cash',     color:'#9ca3af', type:'debt'   },
+  { id:'nps',         name:'NPS',               color:'#059669', type:'nps'    },
+  { id:'real_estate', name:'Real estate',        color:'#10b981', type:'other'  },
+  { id:'gold',        name:'Gold',              color:'#f59e0b', type:'other'  },
+];
+const MANUAL_IDS = ['fd','epf','ppf','real_estate','gold','crypto','savings','nps'];
+const ZERO = () => Object.fromEntries([...ASSET_CLASSES.map(a=>[a.id,0])]);
+
+/* ── STATE ── */
+let S = {
+  assets: { kartik:ZERO(), spouse:ZERO(), father:ZERO(), mother:ZERO() },
+  npsEqPct: { kartik:75, spouse:75, father:75, mother:75 },
+  casLoaded: { kartik:false, spouse:false, father:false, mother:false },
+  history: [],
+  lastUpdated: null,
+  sheetReady: false,
+  oauth: null,
+};
+
+/* ── FORMAT ── */
+function fmt(n) {
+  if(!n||n===0) return '₹0';
+  if(n>=10000000) return '₹'+(n/10000000).toFixed(2)+' Cr';
+  if(n>=100000)   return '₹'+(n/100000).toFixed(1)+'L';
+  return '₹'+Math.round(n).toLocaleString('en-IN');
+}
+function fmtS(n) {
+  if(!n||n===0) return '₹0';
+  if(n>=10000000) return '₹'+(n/10000000).toFixed(1)+'Cr';
+  if(n>=100000)   return '₹'+(n/100000).toFixed(0)+'L';
+  return '₹'+Math.round(n/1000)+'k';
+}
+
+/* ── MATH ── */
+function mTotal(id)   { return Object.values(S.assets[id]).reduce((a,b)=>a+b,0); }
+function aTotal(aid)  { return MEMBERS.reduce((s,m)=>s+(S.assets[m.id][aid]||0),0); }
+function gTotal()     { return MEMBERS.reduce((s,m)=>s+mTotal(m.id),0); }
+function npsEq(id)    { return (S.npsEqPct[id]||75)/100; }
+function npsDt(id)    { return 1 - npsEq(id); }
+function mEq(id)      { return ASSET_CLASSES.filter(a=>a.type==='equity').reduce((s,a)=>s+(S.assets[id][a.id]||0),0) + (S.assets[id].nps||0)*npsEq(id); }
+function mDbt(id)     { return ASSET_CLASSES.filter(a=>a.type==='debt').reduce((s,a)=>s+(S.assets[id][a.id]||0),0) + (S.assets[id].nps||0)*npsDt(id); }
+function mOth(id)     { return ASSET_CLASSES.filter(a=>a.type==='other').reduce((s,a)=>s+(S.assets[id][a.id]||0),0); }
+function totEq()      { return MEMBERS.reduce((s,m)=>s+mEq(m.id),0); }
+function totDbt()     { return MEMBERS.reduce((s,m)=>s+mDbt(m.id),0); }
+function totOth()     { return MEMBERS.reduce((s,m)=>s+mOth(m.id),0); }
+
+/* ── PIN ── */
+let pinBuf = '';
+function pinKey(d) {
+  if(pinBuf.length>=4) return;
+  pinBuf += d;
+  document.getElementById('pd'+(pinBuf.length-1)).classList.add('filled');
+  if(pinBuf.length===4) setTimeout(pinSubmit,120);
+}
+function pinClear() {
+  if(!pinBuf.length) return;
+  pinBuf = pinBuf.slice(0,-1);
+  document.getElementById('pd'+pinBuf.length).classList.remove('filled');
+}
+function pinSubmit() {
+  if(pinBuf === CONFIG.PIN) {
+    document.getElementById('pin-screen').style.display='none';
+    document.getElementById('app').style.display='block';
+    initApp();
+  } else {
+    document.getElementById('pin-err').textContent='Incorrect PIN. Try again.';
+    pinBuf='';
+    for(let i=0;i<4;i++) document.getElementById('pd'+i).classList.remove('filled');
+  }
+}
+function lockApp() {
+  document.getElementById('app').style.display='none';
+  document.getElementById('pin-screen').style.display='flex';
+  pinBuf='';
+  for(let i=0;i<4;i++) document.getElementById('pd'+i).classList.remove('filled');
+  document.getElementById('pin-err').textContent='';
+}
+document.addEventListener('keydown', e => {
+  if(document.getElementById('pin-screen').style.display==='none') return;
+  if(e.key>='0'&&e.key<='9') pinKey(e.key);
+  else if(e.key==='Backspace') pinClear();
+  else if(e.key==='Enter') pinSubmit();
+});
+
+/* ── INIT ── */
+function initApp() {
+  loadLocal();
+  renderAll();
+  loadFromSheets();
+}
+
+/* ── LOCAL STORAGE ── */
+function saveLocal() {
+  localStorage.setItem('fp_state', JSON.stringify({
+    assets: S.assets,
+    npsEqPct: S.npsEqPct,
+    casLoaded: S.casLoaded,
+    history: S.history,
+    lastUpdated: S.lastUpdated,
+  }));
+}
+function loadLocal() {
+  const raw = localStorage.getItem('fp_state');
+  if(!raw) return;
+  try {
+    const d = JSON.parse(raw);
+    if(d.assets)     S.assets     = d.assets;
+    if(d.npsEqPct)   S.npsEqPct   = d.npsEqPct;
+    if(d.casLoaded)  S.casLoaded  = d.casLoaded;
+    if(d.history)    S.history    = d.history;
+    if(d.lastUpdated) S.lastUpdated = d.lastUpdated;
+  } catch(e) {}
+}
+
+/* ── GOOGLE SHEETS ── */
+const SHEET_BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
+
+async function loadFromSheets() {
+  if(CONFIG.SHEET_ID==='YOUR_GOOGLE_SHEET_ID') return; // not configured yet
+  try {
+    const url = `${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_PORTFOLIO}?key=${CONFIG.API_KEY}`;
+    const r = await fetch(url);
+    if(!r.ok) return;
+    const data = await r.json();
+    parseSheetPortfolio(data.values || []);
+    await loadHistoryFromSheet();
+    await loadConfigFromSheet();
+    renderAll();
+    saveLocal();
+  } catch(e) { console.warn('Sheets load failed:', e); }
+}
+
+function parseSheetPortfolio(rows) {
+  if(rows.length<2) return;
+  const headers = rows[0].map(h=>h.toLowerCase().trim());
+  for(let i=1; i<rows.length; i++) {
+    const row = rows[i];
+    const memberId = (row[0]||'').toLowerCase().trim();
+    if(!S.assets[memberId]) continue;
+    headers.forEach((h,j) => {
+      if(j===0) return;
+      if(S.assets[memberId].hasOwnProperty(h)) {
+        S.assets[memberId][h] = parseFloat(row[j])||0;
+      }
+    });
+    S.casLoaded[memberId] = (row[headers.indexOf('cas_loaded')]||'').toLowerCase()==='true';
+  }
+  const luIdx = rows[0].findIndex(h=>h.toLowerCase()==='last_updated');
+  if(luIdx>0 && rows[1]) S.lastUpdated = rows[1][luIdx]||null;
+  updatePeriodBadge();
+}
+
+async function loadHistoryFromSheet() {
+  try {
+    const url = `${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_HISTORY}?key=${CONFIG.API_KEY}`;
+    const r = await fetch(url);
+    if(!r.ok) return;
+    const data = await r.json();
+    const rows = data.values||[];
+    if(rows.length<2) return;
+    S.history = rows.slice(1).map(row => ({
+      date:  row[0]||'',
+      total: parseFloat(row[1])||0,
+      note:  row[2]||'',
+    })).filter(h=>h.date&&h.total);
+  } catch(e) {}
+}
+
+async function loadConfigFromSheet() {
+  try {
+    const url = `${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_CONFIG}?key=${CONFIG.API_KEY}`;
+    const r = await fetch(url);
+    if(!r.ok) return;
+    const data = await r.json();
+    const rows = data.values||[];
+    rows.slice(1).forEach(row => {
+      const mid = (row[0]||'').toLowerCase().trim();
+      const pct = parseFloat(row[1]);
+      if(S.npsEqPct.hasOwnProperty(mid) && !isNaN(pct)) S.npsEqPct[mid] = pct;
+    });
+  } catch(e) {}
+}
+
+/* ── OAUTH + WRITE ── */
+function loadGoogleOAuth() {
+  return new Promise(resolve => {
+    if(window.google && window.google.accounts) { resolve(); return; }
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.onload = resolve;
+    document.head.appendChild(s);
+  });
+}
+
+async function getOAuthToken() {
+  if(S.oauth && S.oauth.expires > Date.now()) return S.oauth.token;
+  await loadGoogleOAuth();
+  return new Promise((resolve, reject) => {
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: CONFIG.OAUTH_CLIENT_ID,
+      scope: 'https://www.googleapis.com/auth/spreadsheets',
+      callback: resp => {
+        if(resp.error) { reject(resp.error); return; }
+        S.oauth = { token: resp.access_token, expires: Date.now() + (resp.expires_in-60)*1000 };
+        resolve(resp.access_token);
+      }
+    });
+    client.requestAccessToken();
+  });
+}
+
+async function writeToSheets() {
+  const token = await getOAuthToken();
+  const now = new Date().toLocaleString('en-IN', {timeZone:'Asia/Kolkata'});
+  // Build portfolio rows
+  const assetIds = ASSET_CLASSES.map(a=>a.id);
+  const headers = ['member', ...assetIds, 'cas_loaded', 'last_updated'];
+  const rows = [headers];
+  MEMBERS.forEach(m => {
+    const row = [m.id, ...assetIds.map(id=>S.assets[m.id][id]||0), S.casLoaded[m.id]?'TRUE':'FALSE', ''];
+    rows.push(row);
+  });
+  rows[1][headers.length-1] = now; // last_updated on first member row only
+
+  const body = { values: rows };
+  await fetch(`${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_PORTFOLIO}!A1?valueInputOption=RAW`, {
+    method: 'PUT',
+    headers: { 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  // Config rows
+  const configRows = [['member','nps_equity_pct'], ...MEMBERS.map(m=>[m.id, S.npsEqPct[m.id]])];
+  await fetch(`${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_CONFIG}!A1?valueInputOption=RAW`, {
+    method: 'PUT',
+    headers: { 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
+    body: JSON.stringify({ values: configRows })
+  });
+
+  S.lastUpdated = now;
+  updatePeriodBadge();
+  saveLocal();
+}
+
+async function appendHistoryToSheet(entry) {
+  const token = await getOAuthToken();
+  await fetch(`${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_HISTORY}!A:C:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+    method: 'POST',
+    headers: { 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
+    body: JSON.stringify({ values: [[entry.date, entry.total, entry.note]] })
+  });
+}
+
+function updatePeriodBadge() {
+  const el = document.getElementById('period-badge');
+  if(el) el.textContent = S.lastUpdated ? 'Updated '+S.lastUpdated.split(',')[0] : 'Not synced';
+}
+
+/* ── CAS PARSING ── */
+function parseCASJson(data, memberId) {
+  let mfEq=0, mfDbt=0, stk=0, bnd=0, gld=0, nps=0;
+  (data.accounts||[]).forEach(acc => {
+    (acc.equities||[]).forEach(eq => {
+      const v = parseFloat(eq.value)||0, n = eq.name||'';
+      if(/ISFL|SACL|SFL|NCD|BOND|\d+\.\d+\s+\d{8}/i.test(n)) bnd+=v; else stk+=v;
+    });
+    (acc.mutual_funds||[]).forEach(mf => {
+      const v = parseFloat(mf.value)||0, n = mf.name||'', t = mf.type||'';
+      if(/gold/i.test(n)) gld+=v;
+      else if(t==='EQUITY'||t==='') mfEq+=v;
+      else mfDbt+=v;
+    });
+    (acc.bonds||[]).forEach(b => { bnd += parseFloat(b.value)||0; });
+  });
+  if(data.nps) nps = parseFloat(data.nps.value)||0;
+  S.assets[memberId].mf_equity = mfEq;
+  S.assets[memberId].mf_debt   = mfDbt;
+  S.assets[memberId].stocks    = stk;
+  S.assets[memberId].bonds     = bnd;
+  if(gld>0) S.assets[memberId].gold = Math.max(S.assets[memberId].gold, gld);
+  if(nps>0) S.assets[memberId].nps  = nps;
+  S.casLoaded[memberId] = true;
+  return mfEq+mfDbt+stk+bnd+gld+nps;
+}
+
+/* ── TAB ROUTING ── */
+let activeTab = 'overview';
+let charts = {};
+function dc(id) { if(charts[id]) { charts[id].destroy(); delete charts[id]; } }
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  document.querySelectorAll('[id^="tab-"]').forEach(el => el.style.display='none');
+  document.getElementById('tab-'+name).style.display='block';
+  activeTab = name;
+  renders[name]();
+}
+
+function renderAll() {
+  renders[activeTab]();
+}
+
+const isDark = false;
+const GRID_C = '#e8e8e8';
+const TEXT_C = '#999';
+const BW = '#fff';
+
+/* ── OVERVIEW ── */
+function renderOverview() {
+  const el = document.getElementById('tab-overview');
+  const gt=gTotal(), eq=totEq(), dbt=totDbt(), oth=totOth();
+  const pending = MEMBERS.filter(m=>!S.casLoaded[m.id]).map(m=>m.name);
+  el.innerHTML = `
+    ${isNotConfigured()?setupNotice():''}
+    ${pending.length ? `<div class="warn-banner">⚠ CAS not yet loaded for: <strong>${pending.join(', ')}</strong> — go to Upload CAS</div>` : ''}
+    <div class="metric-row">
+      <div class="metric"><div class="metric-label">Family net worth</div><div class="metric-value">${fmt(gt)}</div><div class="metric-sub">${MEMBERS.filter(m=>mTotal(m.id)>0).map(m=>m.name).join(' + ')||'No data yet'}</div></div>
+      <div class="metric"><div class="metric-label">Equity</div><div class="metric-value" style="color:var(--eq)">${fmt(eq)}</div><div class="metric-sub">${gt?((eq/gt)*100).toFixed(1)+'%':'—'}</div></div>
+      <div class="metric"><div class="metric-label">Debt + fixed</div><div class="metric-value" style="color:var(--debt)">${fmt(dbt)}</div><div class="metric-sub">${gt?((dbt/gt)*100).toFixed(1)+'%':'—'}</div></div>
+      <div class="metric"><div class="metric-label">Real assets</div><div class="metric-value" style="color:var(--gold)">${fmt(oth)}</div><div class="metric-sub">${gt?((oth/gt)*100).toFixed(1)+'%':'—'}</div></div>
+    </div>
+    <div class="chart-grid">
+      <div class="card"><div class="card-title">By member</div>
+        <div class="legend" id="ov-leg1"></div>
+        <div style="position:relative;height:180px"><canvas id="ovC1" role="img" aria-label="Net worth by member"></canvas></div></div>
+      <div class="card"><div class="card-title">By asset class</div>
+        <div class="legend" id="ov-leg2"></div>
+        <div style="position:relative;height:180px"><canvas id="ovC2" role="img" aria-label="Net worth by asset class"></canvas></div></div>
+    </div>`;
+
+  dc('ov1'); dc('ov2');
+  const mAmts = MEMBERS.map(m=>mTotal(m.id));
+  document.getElementById('ov-leg1').innerHTML = MEMBERS.map((m,i)=>mAmts[i]>0?`<span class="legend-item"><span class="legend-dot" style="background:${m.color}"></span>${m.name} ${gt?((mAmts[i]/gt)*100).toFixed(0)+'%':''}</span>`:'').join('');
+  charts['ov1'] = new Chart(document.getElementById('ovC1'), { type:'doughnut', data:{ labels:MEMBERS.map(m=>m.name), datasets:[{ data:mAmts, backgroundColor:MEMBERS.map(m=>m.color), borderWidth:2, borderColor:BW }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>` ${c.label}: ${fmtS(c.raw)}`}} } } });
+  const topA = ASSET_CLASSES.filter(a=>aTotal(a.id)>0).sort((a,b)=>aTotal(b.id)-aTotal(a.id));
+  document.getElementById('ov-leg2').innerHTML = topA.map(a=>`<span class="legend-item"><span class="legend-dot" style="background:${a.color}"></span>${a.name} ${gt?((aTotal(a.id)/gt)*100).toFixed(0)+'%':''}</span>`).join('');
+  charts['ov2'] = new Chart(document.getElementById('ovC2'), { type:'doughnut', data:{ labels:topA.map(a=>a.name), datasets:[{ data:topA.map(a=>aTotal(a.id)), backgroundColor:topA.map(a=>a.color), borderWidth:2, borderColor:BW }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>` ${c.label}: ${fmtS(c.raw)}`}} } } });
+}
+
+/* ── MEMBERS ── */
+function renderMembers() {
+  const el = document.getElementById('tab-members');
+  const gt = gTotal();
+  el.innerHTML = `
+    <div class="member-grid">${MEMBERS.map(m => {
+      const t = mTotal(m.id), nps = S.assets[m.id].nps;
+      return `<div class="member-card">
+        <div class="m-avatar" style="background:${m.bg};color:${m.tc}">${m.initials}</div>
+        <div class="m-name">${m.name}</div>
+        <div class="m-amt">${t>0?fmt(t):'—'}</div>
+        <div class="m-pct">${t>0&&gt>0?((t/gt)*100).toFixed(1)+'% of family':''}</div>
+        ${nps>0?`<div style="font-size:11px;color:var(--ink3);margin-top:3px">NPS: ${S.npsEqPct[m.id]}% eq / ${100-S.npsEqPct[m.id]}% debt</div>`:''}
+        <div class="m-status ${S.casLoaded[m.id]?'ok':'pending'}">${S.casLoaded[m.id]?'✓ CAS loaded':'CAS pending'}</div>
+      </div>`;
+    }).join('')}</div>
+    ${MEMBERS.some(m=>mTotal(m.id)>0) ? `<div class="card"><div class="card-title">Asset breakdown by member</div>
+      <div style="position:relative;height:${Math.max(200, ASSET_CLASSES.filter(a=>MEMBERS.some(m=>S.assets[m.id][a.id]>0)).length*36+80)}px">
+        <canvas id="mbChart" role="img" aria-label="Assets by member"></canvas></div></div>` : ''}`;
+  const active = ASSET_CLASSES.filter(a=>MEMBERS.some(m=>S.assets[m.id][a.id]>0));
+  if(active.length) {
+    dc('mb');
+    charts['mb'] = new Chart(document.getElementById('mbChart'), { type:'bar', data:{ labels:active.map(a=>a.name), datasets:MEMBERS.map(m=>({ label:m.name, data:active.map(a=>S.assets[m.id][a.id]||0), backgroundColor:m.color, borderRadius:2, borderWidth:0 })) }, options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:true, position:'top', labels:{color:TEXT_C, boxWidth:10, font:{size:11}}}, tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${fmtS(c.raw)}`}} }, scales:{ x:{stacked:true, grid:{color:GRID_C}, ticks:{color:TEXT_C, font:{size:11}, callback:v=>fmtS(v)}}, y:{stacked:true, grid:{display:false}, ticks:{color:TEXT_C, font:{size:11}}} } } });
+  }
+}
+
+/* ── ASSET CLASSES ── */
+function renderAssets() {
+  const el = document.getElementById('tab-assets');
+  const gt = gTotal();
+  const sorted = ASSET_CLASSES.filter(a=>aTotal(a.id)>0).sort((a,b)=>aTotal(b.id)-aTotal(a.id));
+  if(!sorted.length) { el.innerHTML='<div class="card" style="text-align:center;padding:40px;color:var(--ink3)">No asset data yet. Upload CAS files to get started.</div>'; return; }
+  el.innerHTML = `<div class="chart-grid">
+    <div class="card"><div class="card-title">All asset classes</div>
+      ${sorted.map(a=>{ const t=aTotal(a.id), p=((t/gt)*100).toFixed(1); return `<div class="asset-list-row">
+        <div class="a-dot" style="background:${a.color}"></div>
+        <div class="a-name">${a.name}</div>
+        <div class="a-bar-wrap"><div class="a-bar-bg"><div class="a-bar-fill" style="width:${p}%;background:${a.color}"></div></div></div>
+        <div class="a-amt">${fmt(t)}</div><div class="a-pct">${p}%</div></div>`; }).join('')}
+    </div>
+    <div class="card"><div class="card-title">Distribution</div>
+      <div class="legend">${sorted.map(a=>`<span class="legend-item"><span class="legend-dot" style="background:${a.color}"></span>${a.name}</span>`).join('')}</div>
+      <div style="position:relative;height:220px"><canvas id="assetD" role="img" aria-label="Asset distribution"></canvas></div>
+    </div></div>`;
+  dc('ad');
+  charts['ad'] = new Chart(document.getElementById('assetD'), { type:'doughnut', data:{ labels:sorted.map(a=>a.name), datasets:[{ data:sorted.map(a=>aTotal(a.id)), backgroundColor:sorted.map(a=>a.color), borderWidth:2, borderColor:BW }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>` ${c.label}: ${fmtS(c.raw)}`}} } } });
+}
+
+/* ── DEBT / EQUITY ── */
+function renderDebtequity() {
+  const el = document.getElementById('tab-debtequity');
+  const gt=gTotal(), eq=totEq(), dbt=totDbt(), oth=totOth();
+  if(!gt) { el.innerHTML='<div class="card" style="text-align:center;padding:40px;color:var(--ink3)">No data yet.</div>'; return; }
+  const eqP=((eq/gt)*100).toFixed(1), dbtP=((dbt/gt)*100).toFixed(1), othP=((oth/gt)*100).toFixed(1);
+  const sum=(parseFloat(eqP)+parseFloat(dbtP)+parseFloat(othP)).toFixed(1);
+  const npsRows = MEMBERS.filter(m=>S.assets[m.id].nps>0).map(m=>{
+    const n=S.assets[m.id].nps, ep=S.npsEqPct[m.id];
+    return `${m.name}: ${ep}% equity (${fmt(n*ep/100)}) + ${100-ep}% debt (${fmt(n*(100-ep)/100)})`;
+  });
+  el.innerHTML = `
+    <div class="metric-row">
+      <div class="metric"><div class="metric-label">Equity</div><div class="metric-value" style="color:var(--eq)">${fmt(eq)}</div><div class="metric-sub">${eqP}%</div></div>
+      <div class="metric"><div class="metric-label">Debt + fixed</div><div class="metric-value" style="color:var(--debt)">${fmt(dbt)}</div><div class="metric-sub">${dbtP}%</div></div>
+      <div class="metric"><div class="metric-label">Real assets</div><div class="metric-value" style="color:var(--gold)">${fmt(oth)}</div><div class="metric-sub">${othP}%</div></div>
+      <div class="metric"><div class="metric-label">Sum check</div><div class="metric-value" style="color:${Math.abs(100-parseFloat(sum))<0.3?'var(--green)':'var(--red)'}">${sum}%</div><div class="metric-sub">should be 100%</div></div>
+    </div>
+    <div class="chart-grid">
+      <div class="card"><div class="card-title">Family split</div>
+        <div class="legend">
+          <span class="legend-item"><span class="legend-dot" style="background:var(--eq)"></span>Equity ${eqP}%</span>
+          <span class="legend-item"><span class="legend-dot" style="background:var(--debt)"></span>Debt ${dbtP}%</span>
+          <span class="legend-item"><span class="legend-dot" style="background:var(--gold)"></span>Real ${othP}%</span>
+        </div>
+        <div style="position:relative;height:190px"><canvas id="deC" role="img" aria-label="Split"></canvas></div>
+        ${npsRows.length?`<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line);font-size:11px;color:var(--ink3)"><strong style="font-size:11px;color:var(--ink2)">NPS split applied:</strong><br>${npsRows.join('<br>')}</div>`:''}
+      </div>
+      <div class="card"><div class="card-title">By member</div>
+        <div style="position:relative;height:220px"><canvas id="deM" role="img" aria-label="By member"></canvas></div></div>
+    </div>
+    <div class="chart-grid">
+      <div class="card"><div class="card-title">Inside equity</div>
+        ${ASSET_CLASSES.filter(a=>a.type==='equity'&&aTotal(a.id)>0).map(a=>`<div class="asset-list-row"><div class="a-dot" style="background:${a.color}"></div><div class="a-name">${a.name}</div><div class="a-amt">${fmt(aTotal(a.id))}</div><div class="a-pct">${((aTotal(a.id)/eq)*100).toFixed(1)}%</div></div>`).join('')}
+        ${MEMBERS.filter(m=>S.assets[m.id].nps>0).map(m=>{ const v=S.assets[m.id].nps*npsEq(m.id); return `<div class="asset-list-row"><div class="a-dot" style="background:#059669"></div><div class="a-name">NPS — ${m.name} (${S.npsEqPct[m.id]}%)</div><div class="a-amt">${fmt(v)}</div><div class="a-pct">${((v/eq)*100).toFixed(1)}%</div></div>`; }).join('')}
+      </div>
+      <div class="card"><div class="card-title">Inside debt / fixed</div>
+        ${ASSET_CLASSES.filter(a=>a.type==='debt'&&aTotal(a.id)>0).map(a=>`<div class="asset-list-row"><div class="a-dot" style="background:${a.color}"></div><div class="a-name">${a.name}</div><div class="a-amt">${fmt(aTotal(a.id))}</div><div class="a-pct">${((aTotal(a.id)/dbt)*100).toFixed(1)}%</div></div>`).join('')}
+        ${MEMBERS.filter(m=>S.assets[m.id].nps>0).map(m=>{ const v=S.assets[m.id].nps*npsDt(m.id); return `<div class="asset-list-row"><div class="a-dot" style="background:#059669"></div><div class="a-name">NPS — ${m.name} (${100-S.npsEqPct[m.id]}%)</div><div class="a-amt">${fmt(v)}</div><div class="a-pct">${((v/dbt)*100).toFixed(1)}%</div></div>`; }).join('')}
+      </div>
+    </div>`;
+  dc('de'); dc('dem');
+  charts['de'] = new Chart(document.getElementById('deC'), { type:'doughnut', data:{ labels:['Equity','Debt + fixed','Real assets'], datasets:[{ data:[eq,dbt,oth], backgroundColor:['#2563eb','#7c3aed','#d97706'], borderWidth:2, borderColor:BW }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}} } });
+  const mEqs=MEMBERS.map(m=>mEq(m.id)), mDbts=MEMBERS.map(m=>mDbt(m.id)), mOths=MEMBERS.map(m=>mOth(m.id));
+  charts['dem'] = new Chart(document.getElementById('deM'), { type:'bar', data:{ labels:MEMBERS.map(m=>m.name), datasets:[{label:'Equity',data:mEqs,backgroundColor:'#2563eb',borderRadius:2},{label:'Debt',data:mDbts,backgroundColor:'#7c3aed',borderRadius:2},{label:'Real assets',data:mOths,backgroundColor:'#d97706',borderRadius:2}] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:true, position:'top', labels:{color:TEXT_C, boxWidth:10, font:{size:11}}}, tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${fmtS(c.raw)}`}} }, scales:{ x:{stacked:true, grid:{display:false}, ticks:{color:TEXT_C, font:{size:11}}}, y:{stacked:true, grid:{color:GRID_C}, ticks:{color:TEXT_C, font:{size:11}, callback:v=>fmtS(v)}} } } });
+}
+
+/* ── UPLOAD CAS ── */
+function renderUpload() {
+  const el = document.getElementById('tab-upload');
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-title">Upload CAS JSON (casparser output)</div>
+      <p style="font-size:13px;color:var(--ink2);margin-bottom:16px">
+        Run <code>casparser "cas.pdf" -p password -o output.json</code> for each member,
+        then upload each JSON here. Data saves to Google Sheets and syncs for everyone.
+      </p>
+      <div class="form-grid" style="margin-bottom:14px">
+        <div class="form-group">
+          <div class="form-label">Member</div>
+          <select id="up-member">${MEMBERS.map(m=>`<option value="${m.id}">${m.name}${S.casLoaded[m.id]?' ✓':''}</option>`).join('')}</select>
+        </div>
+      </div>
+      <div class="upload-zone" id="up-zone" onclick="document.getElementById('up-file').click()">
+        <div style="font-size:24px;color:var(--ink3)">↑</div>
+        <div class="upload-zone-title">Click to choose JSON file</div>
+        <div class="upload-zone-sub">cas_output.json from casparser</div>
+      </div>
+      <input type="file" id="up-file" accept=".json" style="display:none">
+      <div id="up-status"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">CAS status by member</div>
+      ${MEMBERS.map(m=>`<div class="asset-list-row">
+        <div class="m-avatar" style="background:${m.bg};color:${m.tc};width:28px;height:28px;font-size:11px;flex-shrink:0">${m.initials}</div>
+        <div class="a-name">${m.name}</div>
+        <div style="font-size:12px;color:${S.casLoaded[m.id]?'var(--green)':'var(--ink3)'}">${S.casLoaded[m.id]?'CAS loaded ✓':'Pending'}</div>
+        ${S.casLoaded[m.id]?`<div style="font-size:12px;font-family:var(--mono);color:var(--ink2)">${fmt(mTotal(m.id))}</div>`:''}
+      </div>`).join('')}
+    </div>`;
+
+  document.getElementById('up-file').addEventListener('change', function() {
+    const file = this.files[0];
+    if(!file) return;
+    const mid = document.getElementById('up-member').value;
+    const mName = MEMBERS.find(m=>m.id===mid).name;
+    const statEl = document.getElementById('up-status');
+    statEl.innerHTML = '<div style="font-size:12px;color:var(--ink3);margin-top:8px"><span class="spinner"></span>Reading JSON...</div>';
+    const reader = new FileReader();
+    reader.onload = async e => {
+      try {
+        const data = JSON.parse(e.target.result);
+        const total = parseCASJson(data, mid);
+        statEl.innerHTML = `<div class="ok-msg">✓ Parsed ${mName}'s CAS — ${fmt(total)} total.</div>`;
+        if(CONFIG.SHEET_ID !== 'YOUR_GOOGLE_SHEET_ID') {
+          statEl.innerHTML += '<div style="font-size:12px;color:var(--ink3);margin-top:4px"><span class="spinner"></span>Saving to Google Sheets...</div>';
+          try {
+            await writeToSheets();
+            statEl.innerHTML = `<div class="ok-msg">✓ ${mName}'s portfolio saved and synced. All family members will see the update.</div>`;
+          } catch(e) {
+            statEl.innerHTML += `<div class="err">Sheets sync failed: ${e}. Data saved locally.</div>`;
+          }
+        } else {
+          statEl.innerHTML += '<div style="font-size:12px;color:var(--ink3);margin-top:4px">Google Sheets not configured — saved locally only.</div>';
+        }
+        saveLocal();
+        renderUpload();
+      } catch(err) {
+        statEl.innerHTML = `<div class="err">Could not parse file: ${err.message}. Make sure this is a casparser JSON output.</div>`;
+      }
+    };
+    reader.readAsText(file);
+    this.value=''; // reset so same file can be re-uploaded
+  });
+}
+
+/* ── MANUAL ENTRY ── */
+function renderManual() {
+  const el = document.getElementById('tab-manual');
+  const savedRows = ASSET_CLASSES.filter(a=>MEMBERS.some(m=>S.assets[m.id][a.id]>0));
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-title">Manual entry — assets not in CAS</div>
+      <p style="font-size:13px;color:var(--ink2);margin-bottom:16px">FDs, EPF, PPF, real estate, physical gold, crypto, savings. Changes sync to Google Sheets.</p>
+      <div class="form-grid">
+        <div class="form-group">
+          <div class="form-label">Member</div>
+          <select id="man-member">${MEMBERS.map(m=>`<option value="${m.id}">${m.name}</option>`).join('')}</select>
+        </div>
+        <div class="form-group">
+          <div class="form-label">Asset class</div>
+          <select id="man-asset">
+            <option value="fd">FDs / RDs</option>
+            <option value="epf">EPF</option>
+            <option value="ppf">PPF</option>
+            <option value="real_estate">Real estate</option>
+            <option value="gold">Gold (physical)</option>
+            <option value="crypto">Crypto</option>
+            <option value="savings">Savings / cash</option>
+            <option value="nps">NPS</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <div class="form-label">Current value (₹)</div>
+          <input type="number" id="man-value" placeholder="e.g. 500000" min="0">
+        </div>
+      </div>
+
+      <div class="nps-panel" id="nps-panel">
+        <div class="nps-panel-title">NPS equity allocation for <span id="nps-member-name">this member</span></div>
+        <div class="nps-slider-row">
+          <span style="font-size:12px;color:var(--ink3);min-width:40px">Equity</span>
+          <input type="range" id="nps-slider" min="0" max="100" step="5">
+          <span class="nps-val" id="nps-eq-val">75%</span>
+        </div>
+        <div class="nps-preview" id="nps-preview">75% equity / 25% debt</div>
+      </div>
+
+      <div class="quick-row">
+        <span class="quick-label">Quick fill:</span>
+        ${[['fd','FD'],['epf','EPF'],['ppf','PPF'],['real_estate','Real estate'],['gold','Gold'],['crypto','Crypto'],['savings','Savings'],['nps','NPS']].map(([id,l])=>`<button class="btn btn-sm" id="qf-${id}">${l}</button>`).join('')}
+      </div>
+      <div class="err" id="man-err"></div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="man-save">Save value</button>
+        <button class="btn" id="man-clear">Clear manual entries for member</button>
+      </div>
+      <div class="ok-msg" id="man-status"></div>
+    </div>
+
+    ${savedRows.length ? `<div class="card">
+      <div class="card-title">All values</div>
+      <div class="data-table-wrap"><table class="data-table">
+        <thead><tr>
+          <th>Asset</th>
+          ${MEMBERS.map(m=>`<th class="r">${m.name}</th>`).join('')}
+          <th class="r">Total</th>
+        </tr></thead>
+        <tbody>
+          ${savedRows.map(a=>`<tr>
+            <td style="display:flex;align-items:center;gap:6px"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${a.color};flex-shrink:0"></span>${a.name}${a.id==='nps'?` <span style="font-size:10px;color:var(--ink3)">(split)</span>`:''}</td>
+            ${MEMBERS.map(m=>{ const v=S.assets[m.id][a.id]; return `<td class="r">${v>0?fmt(v):'—'}</td>`; }).join('')}
+            <td class="r">${fmt(aTotal(a.id))}</td>
+          </tr>`).join('')}
+        </tbody>
+        <tfoot><tr class="total-row">
+          <td>Total</td>
+          ${MEMBERS.map(m=>`<td class="r">${mTotal(m.id)>0?fmt(mTotal(m.id)):'—'}</td>`).join('')}
+          <td class="r">${fmt(gTotal())}</td>
+        </tr></tfoot>
+      </table></div>
+    </div>` : ''}`;
+
+  // Wire up NPS panel
+  const assetSel = document.getElementById('man-asset');
+  const memberSel = document.getElementById('man-member');
+  const npsPanel = document.getElementById('nps-panel');
+  const slider = document.getElementById('nps-slider');
+  const npsEqVal = document.getElementById('nps-eq-val');
+  const npsPreview = document.getElementById('nps-preview');
+
+  function updateNPS() {
+    const mid = memberSel.value;
+    const isNPS = assetSel.value==='nps';
+    npsPanel.classList.toggle('show', isNPS);
+    if(isNPS) {
+      const pct = S.npsEqPct[mid]||75;
+      slider.value = pct;
+      npsEqVal.textContent = pct+'%';
+      document.getElementById('nps-member-name').textContent = MEMBERS.find(m=>m.id===mid).name;
+      updateNPSPreview(pct);
+    }
+  }
+  function updateNPSPreview(pct) {
+    const v = parseFloat(document.getElementById('man-value').value)||0;
+    npsPreview.textContent = v>0
+      ? `${pct}% equity (${fmt(v*pct/100)}) / ${100-pct}% debt (${fmt(v*(100-pct)/100)})`
+      : `${pct}% equity / ${100-pct}% debt`;
+  }
+
+  assetSel.addEventListener('change', updateNPS);
+  memberSel.addEventListener('change', updateNPS);
+  slider.addEventListener('input', () => {
+    const pct = parseInt(slider.value);
+    S.npsEqPct[memberSel.value] = pct;
+    npsEqVal.textContent = pct+'%';
+    updateNPSPreview(pct);
+  });
+  document.getElementById('man-value').addEventListener('input', () => {
+    if(assetSel.value==='nps') updateNPSPreview(parseInt(slider.value));
+    document.getElementById('man-err').textContent='';
+  });
+
+  MANUAL_IDS.forEach(id => {
+    const btn = document.getElementById('qf-'+id);
+    if(btn) btn.addEventListener('click', () => { assetSel.value=id; updateNPS(); document.getElementById('man-value').focus(); });
+  });
+
+  document.getElementById('man-save').addEventListener('click', async () => {
+    const mid = memberSel.value, aid = assetSel.value;
+    const raw = document.getElementById('man-value').value.trim();
+    const val = parseFloat(raw);
+    const errEl = document.getElementById('man-err'), statEl = document.getElementById('man-status');
+    errEl.textContent=''; statEl.textContent='';
+    if(raw===''||isNaN(val)||val<0) { errEl.textContent='Enter a valid amount.'; return; }
+    S.assets[mid][aid] = val;
+    const mName=MEMBERS.find(m=>m.id===mid).name, aName=ASSET_CLASSES.find(a=>a.id===aid).name;
+    let extra='';
+    if(aid==='nps') { const p=S.npsEqPct[mid]; extra=` → ${fmt(val*p/100)} eq + ${fmt(val*(100-p)/100)} debt`; }
+    document.getElementById('man-value').value='';
+    saveLocal();
+    if(CONFIG.SHEET_ID !== 'YOUR_GOOGLE_SHEET_ID') {
+      statEl.textContent='Saving...';
+      try { await writeToSheets(); statEl.textContent=`✓ Saved: ${mName} — ${aName} → ${fmt(val)}${extra}`; }
+      catch(e) { statEl.textContent=`✓ Saved locally. Sheets sync failed: ${e}`; }
+    } else {
+      statEl.textContent=`✓ Saved: ${mName} — ${aName} → ${fmt(val)}${extra}`;
+    }
+    renderManual();
+  });
+
+  document.getElementById('man-clear').addEventListener('click', () => {
+    const mid=memberSel.value;
+    MANUAL_IDS.forEach(k=>{S.assets[mid][k]=0;});
+    saveLocal();
+    document.getElementById('man-status').textContent=`✓ Cleared manual entries for ${MEMBERS.find(m=>m.id===mid).name}.`;
+    renderManual();
+  });
+}
+
+/* ── HISTORY ── */
+function renderHistory() {
+  const el = document.getElementById('tab-history');
+  const hasHistory = S.history.length>1;
+  el.innerHTML = `
+    ${hasHistory ? `<div class="card"><div class="card-title">Net worth over time</div>
+      <div style="position:relative;height:200px"><canvas id="hChart" role="img" aria-label="History"></canvas></div></div>` : ''}
+    <div class="card">
+      <div class="card-title">Snapshots</div>
+      ${S.history.length===0 ? `<div style="text-align:center;padding:24px;color:var(--ink3);font-size:13px">No snapshots yet. Record your first one below.</div>` :
+        [...S.history].reverse().map((h,i,arr) => {
+          const prev=arr[i+1], chg=prev?h.total-prev.total:0, pct=prev?((chg/prev.total)*100).toFixed(1):null;
+          return `<div class="history-row">
+            <span class="h-date">${h.date}</span>
+            <span class="h-amt">${fmt(h.total)}</span>
+            ${pct!==null?`<span class="h-change ${chg>=0?'up':'dn'}">${chg>=0?'▲':'▼'} ${fmtS(Math.abs(chg))} (${Math.abs(pct)}%)</span>`:'<span></span>'}
+            <span class="h-note">${h.note||''}</span>
+          </div>`;
+        }).join('')}
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="snap-btn">Record today's snapshot</button>
+    </div>
+    <div class="ok-msg" id="snap-status" style="margin-top:8px"></div>`;
+
+  document.getElementById('snap-btn').addEventListener('click', async () => {
+    const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const now=new Date(), label=months[now.getMonth()]+' '+now.getFullYear();
+    const pending=MEMBERS.filter(m=>!S.casLoaded[m.id]).map(m=>m.name);
+    const note=pending.length?`${pending.join('+')} CAS missing`:'All members';
+    const entry={date:label, total:gTotal(), note};
+    const existing=S.history.findIndex(h=>h.date===label);
+    if(existing>=0) S.history[existing]=entry; else S.history.push(entry);
+    saveLocal();
+    const statEl=document.getElementById('snap-status');
+    if(CONFIG.SHEET_ID !== 'YOUR_GOOGLE_SHEET_ID') {
+      statEl.textContent='Saving...';
+      try { await appendHistoryToSheet(entry); statEl.textContent=`✓ Snapshot saved: ${fmt(entry.total)}`; }
+      catch(e) { statEl.textContent=`✓ Saved locally. Sheets sync failed.`; }
+    } else {
+      statEl.textContent=`✓ Snapshot saved: ${fmt(entry.total)}`;
+    }
+    renderHistory();
+  });
+
+  if(hasHistory) {
+    dc('hc');
+    charts['hc'] = new Chart(document.getElementById('hChart'), { type:'line', data:{ labels:S.history.map(h=>h.date), datasets:[{ data:S.history.map(h=>h.total), borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,0.07)', borderWidth:2, pointRadius:5, pointBackgroundColor:'#2563eb', tension:0.3, fill:true }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>` ${fmtS(c.raw)}`}} }, scales:{ x:{grid:{display:false}, ticks:{color:TEXT_C, font:{size:11}}}, y:{grid:{color:GRID_C}, ticks:{color:TEXT_C, font:{size:11}, callback:v=>fmtS(v)}} } } });
+  }
+}
+
+/* ── ADVICE ── */
+function renderAdvice() {
+  const el = document.getElementById('tab-advice');
+  const gt=gTotal(), eq=totEq(), dbt=totDbt(), oth=totOth();
+  const summary = buildAdviceSummary();
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-title">Get investment advice from Claude</div>
+      <p style="font-size:13px;color:var(--ink2);margin-bottom:16px">
+        Copy the portfolio summary below and paste it into a new Claude conversation.
+        Then ask for SIP recommendations, rebalancing advice, or allocation analysis.
+      </p>
+      <div class="advice-box">
+        <div class="advice-title">Portfolio summary — ready to paste into Claude</div>
+        <div class="advice-body" id="advice-text">${summary}</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="copyAdvice()">Copy summary</button>
+        <button class="btn" onclick="window.open('https://claude.ai','_blank')">Open Claude ↗</button>
+      </div>
+      <div class="ok-msg" id="advice-copy-status" style="margin-top:8px"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Suggested questions to ask Claude</div>
+      ${[
+        'We want to deploy ₹50k/month in new SIPs. Given the current allocation, where should it go?',
+        'Our equity allocation is X%. Is that appropriate given the age mix of our family?',
+        'Which member has the most unoptimised portfolio and what should they change?',
+        'Mother / Father has ₹__L in FDs maturing. What are the best redeployment options?',
+        'We want to reduce our equity exposure by 10%. Which funds should we exit or trim first?',
+        'Are there any overlapping funds across family members that we should consolidate?',
+      ].map(q=>`<div class="asset-list-row" style="cursor:pointer" onclick="copyQ('${q.replace(/'/g,"\\'")}')">
+        <div style="font-size:13px;flex:1">${q}</div>
+        <div style="font-size:11px;color:var(--ink3)">Copy</div>
+      </div>`).join('')}
+    </div>`;
+}
+
+function buildAdviceSummary() {
+  const gt=gTotal(), eq=totEq(), dbt=totDbt(), oth=totOth();
+  const lines = [
+    `FAMILY PORTFOLIO SUMMARY`,
+    `Last updated: ${S.lastUpdated||'—'}`,
+    ``,
+    `TOTAL NET WORTH: ${fmt(gt)}`,
+    `  Equity (incl. NPS split): ${fmt(eq)} (${gt?((eq/gt)*100).toFixed(1):'0'}%)`,
+    `  Debt + fixed:              ${fmt(dbt)} (${gt?((dbt/gt)*100).toFixed(1):'0'}%)`,
+    `  Real assets (RE + gold):   ${fmt(oth)} (${gt?((oth/gt)*100).toFixed(1):'0'}%)`,
+    ``,
+    `BY MEMBER:`,
+    ...MEMBERS.map(m => {
+      const t=mTotal(m.id);
+      if(!t) return `  ${m.name}: No data yet`;
+      const nps=S.assets[m.id].nps;
+      return [
+        `  ${m.name}: ${fmt(t)} (${gt?((t/gt)*100).toFixed(1):'0'}% of family)`,
+        `    Equity: ${fmt(mEq(m.id))}  Debt: ${fmt(mDbt(m.id))}  Real assets: ${fmt(mOth(m.id))}`,
+        nps>0?`    NPS: ${fmt(nps)} split ${S.npsEqPct[m.id]}% eq / ${100-S.npsEqPct[m.id]}% debt`:'',
+      ].filter(Boolean).join('\n');
+    }),
+    ``,
+    `ASSET CLASSES:`,
+    ...ASSET_CLASSES.filter(a=>aTotal(a.id)>0).sort((a,b)=>aTotal(b.id)-aTotal(a.id)).map(a =>
+      `  ${a.name}: ${fmt(aTotal(a.id))} (${gt?((aTotal(a.id)/gt)*100).toFixed(1):'0'}%)`
+    ),
+    ``,
+    `HISTORY (last ${Math.min(S.history.length,6)} snapshots):`,
+    ...(S.history.length ? [...S.history].slice(-6).map(h=>`  ${h.date}: ${fmt(h.total)}`) : ['  No history yet']),
+  ];
+  return lines.join('\n');
+}
+
+function copyAdvice() {
+  navigator.clipboard.writeText(document.getElementById('advice-text').textContent);
+  document.getElementById('advice-copy-status').textContent='✓ Copied to clipboard';
+  setTimeout(()=>{ document.getElementById('advice-copy-status').textContent=''; },2000);
+}
+function copyQ(q) {
+  navigator.clipboard.writeText(q);
+}
+
+/* ── SETUP HELPERS ── */
+function isNotConfigured() {
+  return CONFIG.SHEET_ID==='YOUR_GOOGLE_SHEET_ID';
+}
+function setupNotice() {
+  return `<div class="setup-notice">
+    <strong>⚙ Google Sheets not configured.</strong> The app is working with local storage only.
+    To enable syncing across family members, see the SETUP GUIDE at the bottom of the HTML file.
+    Data entered now will be saved locally and can be migrated once Sheets is connected.
+  </div>`;
+}
+
+/* ── SETUP ── */
+function renderSetup() {
+  const el = document.getElementById('tab-setup');
+  const configured = CONFIG.SHEET_ID !== 'YOUR_GOOGLE_SHEET_ID';
+  el.innerHTML = `
+    <div class="card" style="border-left:3px solid #d97706">
+      <div class="card-title" style="color:#d97706">Configuration status</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px">
+        <div>PIN: <strong>${configured||CONFIG.PIN!=='1234'?'✓ Set':'⚠ Still default (1234)'}</strong></div>
+        <div>Sheet ID: <strong>${CONFIG.SHEET_ID!=='YOUR_GOOGLE_SHEET_ID'?'✓ Set':'✗ Not set'}</strong></div>
+        <div>API Key: <strong>${CONFIG.API_KEY!=='YOUR_GOOGLE_API_KEY'?'✓ Set':'✗ Not set'}</strong></div>
+        <div>OAuth Client: <strong>${CONFIG.OAUTH_CLIENT_ID!=='YOUR_OAUTH_CLIENT_ID.apps.googleusercontent.com'?'✓ Set':'✗ Not set'}</strong></div>
+      </div>
+      <p style="font-size:12px;color:var(--ink3);margin-top:12px">Edit the <code>CONFIG</code> block at the top of the HTML file to fill in the missing values. Open the file in Notepad or VS Code.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Step 1 — create the Google Sheet</div>
+      <ol style="font-size:13px;line-height:2;padding-left:18px;color:var(--ink2)">
+        <li>Go to <strong>sheets.google.com</strong> → create a new blank sheet</li>
+        <li>Rename the first tab (bottom left) to: <code>portfolio</code></li>
+        <li>Add two more tabs named: <code>history</code> and <code>config</code></li>
+        <li>In the <strong>portfolio</strong> tab, paste this exact header in row 1:<br>
+          <code style="display:block;margin:6px 0;padding:8px;background:var(--bg);border-radius:6px;font-size:11px;line-height:1.6">member&nbsp;&nbsp;mf_equity&nbsp;&nbsp;stocks&nbsp;&nbsp;crypto&nbsp;&nbsp;mf_debt&nbsp;&nbsp;bonds&nbsp;&nbsp;fd&nbsp;&nbsp;epf&nbsp;&nbsp;ppf&nbsp;&nbsp;savings&nbsp;&nbsp;nps&nbsp;&nbsp;real_estate&nbsp;&nbsp;gold&nbsp;&nbsp;cas_loaded&nbsp;&nbsp;last_updated</code>
+          <button class="btn btn-sm" onclick="copySetupText('member\tmf_equity\tstocks\tcrypto\tmf_debt\tbonds\tfd\tepf\tppf\tsavings\tnps\treal_estate\tgold\tcas_loaded\tlast_updated')">Copy header row</button>
+        </li>
+        <li>In the <strong>history</strong> tab, paste in row 1: <code>date&nbsp;&nbsp;total&nbsp;&nbsp;note</code></li>
+        <li>In the <strong>config</strong> tab, paste in row 1: <code>member&nbsp;&nbsp;nps_equity_pct</code></li>
+        <li>Copy the Sheet ID from the URL bar:<br>
+          <code style="font-size:11px">https://docs.google.com/spreadsheets/d/<strong style="background:#fef9c3;padding:1px 3px">[COPY THIS PART]</strong>/edit</code>
+        </li>
+        <li>Paste it as <code>SHEET_ID</code> in the CONFIG block at the top of this HTML file</li>
+        <li>Share the sheet: Share → General access → Anyone with the link → <strong>Viewer</strong></li>
+      </ol>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Step 2 — get a Google API key (read access for all family)</div>
+      <ol style="font-size:13px;line-height:2;padding-left:18px;color:var(--ink2)">
+        <li>Go to <a href="https://console.cloud.google.com" target="_blank" style="color:var(--eq)">console.cloud.google.com</a></li>
+        <li>Create a new project (top bar → dropdown → New Project). Name it anything.</li>
+        <li>Go to <strong>APIs & Services → Library</strong> → search <em>Google Sheets API</em> → Enable it</li>
+        <li>Go to <strong>APIs & Services → Credentials → Create Credentials → API Key</strong></li>
+        <li>Click the new key → under <em>API restrictions</em>, select <strong>Google Sheets API</strong></li>
+        <li>Under <em>Website restrictions</em>, add your GitHub Pages domain (Step 5 first if needed)</li>
+        <li>Copy the key → paste as <code>API_KEY</code> in CONFIG</li>
+      </ol>
+      <div style="background:#fef3c7;border-radius:6px;padding:10px;font-size:12px;color:#78350f;margin-top:8px">
+        ⚠ The API key is in the HTML file which is public. Restrict it to your domain and to Sheets API only to prevent misuse.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Step 3 — get an OAuth client ID (write access for you, the admin)</div>
+      <ol style="font-size:13px;line-height:2;padding-left:18px;color:var(--ink2)">
+        <li>Still in Google Cloud Console → <strong>APIs & Services → Credentials</strong></li>
+        <li>Create Credentials → <strong>OAuth 2.0 Client ID</strong></li>
+        <li>If prompted, configure the OAuth consent screen first: External → fill in App name and your email → Save</li>
+        <li>Application type: <strong>Web application</strong></li>
+        <li>Under <em>Authorized JavaScript origins</em>, add:<br>
+          <code>https://yourusername.github.io</code> (your GitHub Pages URL)<br>
+          <code>http://localhost</code> (for local testing)
+        </li>
+        <li>Click Create → copy the Client ID → paste as <code>OAUTH_CLIENT_ID</code> in CONFIG</li>
+        <li>On the OAuth consent screen, add your Google account as a <strong>Test user</strong> (under Audience)</li>
+      </ol>
+      <p style="font-size:12px;color:var(--ink3);margin-top:8px">OAuth only pops up when you upload data. Family members viewing the dashboard don't need OAuth.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Step 4 — change the PIN</div>
+      <p style="font-size:13px;color:var(--ink2)">Open the HTML file in Notepad or VS Code. Find the <code>CONFIG</code> block near the top. Change <code>PIN: '1234'</code> to your chosen 4-digit PIN. Save the file.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Step 5 — host on GitHub Pages</div>
+      <ol style="font-size:13px;line-height:2;padding-left:18px;color:var(--ink2)">
+        <li>Go to <a href="https://github.com" target="_blank" style="color:var(--eq)">github.com</a> → sign in or create a free account</li>
+        <li>Click <strong>New repository</strong> → name it e.g. <code>family-portfolio</code> → set to <strong>Public</strong> → Create</li>
+        <li>On the repo page → <strong>Add file → Upload files</strong> → upload your HTML file</li>
+        <li>Before uploading, rename the file to <strong>index.html</strong></li>
+        <li>Commit the file (green button at the bottom)</li>
+        <li>Go to <strong>Settings → Pages</strong> → Source: <em>Deploy from branch</em> → Branch: <em>main</em> → Save</li>
+        <li>Wait ~2 minutes → your URL will be: <code>https://yourusername.github.io/family-portfolio</code></li>
+        <li>Share this URL with family — they enter the PIN and see the dashboard</li>
+      </ol>
+      <div style="background:#f0fdf4;border-radius:6px;padding:10px;font-size:12px;color:#14532d;margin-top:8px">
+        ✓ GitHub Pages is free forever. The URL is permanent. No server to maintain.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Troubleshooting</div>
+      <div style="font-size:13px;color:var(--ink2);line-height:1.8">
+        <p><strong>CORS error on Sheets:</strong> Make sure the sheet is shared as "Anyone with the link — Viewer"</p>
+        <p><strong>OAuth popup blocked:</strong> Allow popups for your GitHub Pages domain in browser settings</p>
+        <p><strong>OAuth error "Access blocked":</strong> Add your Google account as a Test user in the OAuth consent screen</p>
+        <p><strong>Data not updating:</strong> Hard-refresh with Ctrl+Shift+R to clear cached data</p>
+        <p><strong>API key error:</strong> Check that the Sheets API is enabled and the key restriction includes your domain</p>
+        <p><strong>Want help?</strong> Paste the error message into Claude and ask for help debugging it</p>
+      </div>
+    </div>`;
+
+  el.querySelectorAll('button[onclick^="copySetupText"]').forEach(btn => {
+    const txt = btn.getAttribute('onclick').match(/copySetupText\('(.+)'\)/)?.[1];
+    if(txt) btn.addEventListener('click', () => {
+      navigator.clipboard.writeText(txt.replace(/\\t/g,'\t'));
+      btn.textContent = '✓ Copied';
+      setTimeout(()=>{ btn.textContent='Copy header row'; }, 2000);
+    });
+  });
+}
+
+function copySetupText(txt) {
+  navigator.clipboard.writeText(txt.replace(/\\t/g,'\t'));
+}
+
+/* ── RENDER MAP ── */
+const renders = {
+  overview:    renderOverview,
+  members:     renderMembers,
+  assets:      renderAssets,
+  debtequity:  renderDebtequity,
+  upload:      renderUpload,
+  manual:      renderManual,
+  history:     renderHistory,
+  advice:      renderAdvice,
+  setup:       renderSetup,
+};
+</script>
+
+<!--
+═══════════════════════════════════════════════════════════════
+  SETUP GUIDE — ONE TIME, ~15 MINUTES
+═══════════════════════════════════════════════════════════════
+
+STEP 1: Create the Google Sheet
+  1. Go to sheets.google.com → create a new sheet
+  2. Rename the first tab to: portfolio
+  3. Add two more tabs named: history  and  config
+  4. In the 'portfolio' tab, paste this header row in row 1:
+     member  mf_equity  stocks  crypto  mf_debt  bonds  fd  epf  ppf  savings  nps  real_estate  gold  cas_loaded  last_updated
+  5. In the 'history' tab, paste: date  total  note
+  6. In the 'config' tab, paste:  member  nps_equity_pct
+  7. Copy the Sheet ID from the URL:
+     https://docs.google.com/spreadsheets/d/[THIS PART]/edit
+     Paste it as SHEET_ID in the CONFIG block at the top of this file.
+
+STEP 2: Get a Google API key (for reading — family members)
+  1. Go to console.cloud.google.com
+  2. Create a new project (or use an existing one)
+  3. Enable "Google Sheets API" (APIs & Services → Library → search Sheets)
+  4. Go to APIs & Services → Credentials → Create Credentials → API Key
+  5. Click the key → restrict it to "Google Sheets API" and your GitHub Pages domain
+  6. Paste the key as API_KEY in CONFIG above
+
+STEP 3: Get an OAuth Client ID (for writing — you, the admin)
+  1. Still in Credentials → Create Credentials → OAuth 2.0 Client ID
+  2. Choose "Web application"
+  3. Add your GitHub Pages URL to Authorized JavaScript origins
+     (e.g. https://yourusername.github.io)
+  4. Copy the Client ID → paste as OAUTH_CLIENT_ID in CONFIG above
+  5. Make the Google Sheet shareable: Share → Anyone with link → Viewer
+     (OAuth handles writer auth — the sheet itself can stay viewer-public)
+
+STEP 4: Change the PIN
+  Change CONFIG.PIN from '1234' to a 4-digit PIN of your choice.
+
+STEP 5: Host on GitHub Pages
+  1. Go to github.com → sign in (or create account)
+  2. New repository → name it e.g. family-portfolio → Public → Create
+  3. Upload this HTML file, rename it to index.html
+  4. Settings → Pages → Source: main branch → Save
+  5. Your URL will be: https://yourusername.github.io/family-portfolio
+  6. Share this URL with family — they use it to view the dashboard
+  7. Only you need OAuth to upload data; family can read with the API key
+
+TROUBLESHOOTING
+  - "CORS error" on Sheets: make sure the sheet is shared publicly (viewer)
+  - OAuth popup blocked: allow popups for your GitHub Pages domain
+  - Data not updating: hard-refresh (Ctrl+Shift+R) to clear cache
+═══════════════════════════════════════════════════════════════
+-->
+</body>
+</html>
