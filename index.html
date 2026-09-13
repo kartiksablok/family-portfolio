@@ -401,6 +401,8 @@ let S = {
   assets: { kartik:ZERO(), spouse:ZERO(), father:ZERO(), mother:ZERO() },
   npsEqPct: { kartik:75, spouse:75, father:75, mother:75 },
   casLoaded: { kartik:false, spouse:false, father:false, mother:false },
+  casDate:   { kartik:null, spouse:null, father:null, mother:null },
+  manualDate:{ kartik:null, spouse:null, father:null, mother:null },
   history: [],
   lastUpdated: null,
   sheetReady: false,
@@ -408,6 +410,17 @@ let S = {
 };
 
 /* ── FORMAT ── */
+function monthYear() {
+  const d=new Date();
+  return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]+' '+d.getFullYear();
+}
+function formatIndian(digits) {
+  if(!digits) return '';
+  if(digits.length<=3) return digits;
+  const last3 = digits.slice(-3);
+  const rest  = digits.slice(0,-3);
+  return rest.replace(/\B(?=(\d{2})+(?!\d))/g,',')+','+last3;
+}
 function fmt(n) {
   if(!n||n===0) return '₹0';
   if(n>=10000000) return '₹'+(n/10000000).toFixed(2)+' Cr';
@@ -485,6 +498,8 @@ function saveLocal() {
     assets: S.assets,
     npsEqPct: S.npsEqPct,
     casLoaded: S.casLoaded,
+    casDate:   S.casDate,
+    manualDate: S.manualDate,
     history: S.history,
     lastUpdated: S.lastUpdated,
   }));
@@ -497,6 +512,8 @@ function loadLocal() {
     if(d.assets)     S.assets     = d.assets;
     if(d.npsEqPct)   S.npsEqPct   = d.npsEqPct;
     if(d.casLoaded)  S.casLoaded  = d.casLoaded;
+    if(d.casDate)    S.casDate    = d.casDate;
+    if(d.manualDate) S.manualDate = d.manualDate;
     if(d.history)    S.history    = d.history;
     if(d.lastUpdated) S.lastUpdated = d.lastUpdated;
   } catch(e) {}
@@ -670,6 +687,7 @@ function parseCASJson(data, memberId) {
   if(gld>0) S.assets[memberId].gold = Math.max(S.assets[memberId].gold, gld);
   if(nps>0) S.assets[memberId].nps  = nps;
   S.casLoaded[memberId] = true;
+  S.casDate[memberId] = monthYear();
   return mfEq+mfDbt+stk+bnd+gld+nps;
 }
 
@@ -741,7 +759,8 @@ function renderMembers() {
         <div class="m-amt">${t>0?fmt(t):'—'}</div>
         <div class="m-pct">${t>0&&gt>0?((t/gt)*100).toFixed(1)+'% of family':''}</div>
         ${nps>0?`<div style="font-size:11px;color:var(--ink3);margin-top:3px">NPS: ${S.npsEqPct[m.id]}% eq / ${100-S.npsEqPct[m.id]}% debt</div>`:''}
-        <div class="m-status ${S.casLoaded[m.id]?'ok':'pending'}">${S.casLoaded[m.id]?'✓ CAS loaded':'CAS pending'}</div>
+        <div class="m-status ${S.casLoaded[m.id]?'ok':'pending'}">${S.casLoaded[m.id]?'✓ CAS: '+(S.casDate[m.id]||'loaded'):'CAS pending'}</div>
+        ${S.manualDate[m.id]?`<div style="font-size:11px;color:var(--ink3);margin-top:2px">Manual: ${S.manualDate[m.id]}</div>`:''}
       </div>`;
     }).join('')}</div>
     ${MEMBERS.some(m=>mTotal(m.id)>0) ? `<div class="card"><div class="card-title">Asset breakdown by member</div>
@@ -853,9 +872,25 @@ function renderUpload() {
       ${MEMBERS.map(m=>`<div class="asset-list-row">
         <div class="m-avatar" style="background:${m.bg};color:${m.tc};width:28px;height:28px;font-size:11px;flex-shrink:0">${m.initials}</div>
         <div class="a-name">${m.name}</div>
-        <div style="font-size:12px;color:${S.casLoaded[m.id]?'var(--green)':'var(--ink3)'}">${S.casLoaded[m.id]?'CAS loaded ✓':'Pending'}</div>
+        <div style="font-size:12px;color:${S.casLoaded[m.id]?'var(--green)':'var(--ink3)'}">
+          ${S.casLoaded[m.id]?'CAS: '+(S.casDate[m.id]||'loaded ✓'):'Pending'}
+          ${S.manualDate[m.id]?`<span style="color:var(--ink3)"> · Manual: ${S.manualDate[m.id]}</span>`:''}
+        </div>
         ${S.casLoaded[m.id]?`<div style="font-size:12px;font-family:var(--mono);color:var(--ink2)">${fmt(mTotal(m.id))}</div>`:''}
       </div>`).join('')}
+    </div>
+
+    <div class="card" style="border:1px solid #fecaca">
+      <div class="card-title" style="color:var(--red)">Reset member data</div>
+      <p style="font-size:13px;color:var(--ink2);margin-bottom:14px">Clears all CAS and manual values for the selected member and syncs the wipe to Google Sheets. Cannot be undone.</p>
+      <div class="form-grid" style="margin-bottom:14px">
+        <div class="form-group">
+          <div class="form-label">Member to reset</div>
+          <select id="reset-member">${MEMBERS.map(m=>`<option value="${m.id}">${m.name}${(S.casLoaded[m.id]||S.manualDate[m.id])?(' — '+fmt(mTotal(m.id))):'  (no data)'}</option>`).join('')}</select>
+        </div>
+      </div>
+      <button class="btn" id="reset-btn" style="color:var(--red);border-color:#fecaca">Reset all data for this member</button>
+      <div id="reset-status" style="margin-top:10px;font-size:13px"></div>
     </div>`;
 
   document.getElementById('up-file').addEventListener('change', function() {
@@ -891,6 +926,33 @@ function renderUpload() {
     reader.readAsText(file);
     this.value=''; // reset so same file can be re-uploaded
   });
+
+  document.getElementById('reset-btn').addEventListener('click', async () => {
+    const mid = document.getElementById('reset-member').value;
+    const mName = MEMBERS.find(m=>m.id===mid).name;
+    const statEl = document.getElementById('reset-status');
+    if(!confirm(`Reset ALL data for ${mName}? This clears every asset value, CAS status, and manual entry for this member and syncs the change to Google Sheets. This cannot be undone.`)) return;
+    // Wipe state for this member
+    S.assets[mid] = ZERO();
+    S.casLoaded[mid] = false;
+    S.casDate[mid] = null;
+    S.manualDate[mid] = null;
+    saveLocal();
+    statEl.textContent = 'Cleared locally.';
+    if(CONFIG.SHEET_ID !== 'YOUR_GOOGLE_SHEET_ID') {
+      statEl.innerHTML = '<span class="spinner"></span> Syncing to Google Sheets...';
+      try {
+        await writeToSheets();
+        statEl.innerHTML = `<span style="color:var(--green)">✓ ${mName}'s data has been reset and synced to Sheets.</span>`;
+      } catch(e) {
+        statEl.innerHTML = `<span style="color:var(--red)">Cleared locally. Sheets sync failed: ${e}</span>`;
+      }
+    } else {
+      statEl.innerHTML = `<span style="color:var(--green)">✓ ${mName}'s data has been reset (locally only — Sheets not configured).</span>`;
+    }
+    renderUpload();
+    renderOverview();
+  });
 }
 
 /* ── MANUAL ENTRY ── */
@@ -900,7 +962,14 @@ function renderManual() {
   el.innerHTML = `
     <div class="card">
       <div class="card-title">Manual entry — assets not in CAS</div>
-      <p style="font-size:13px;color:var(--ink2);margin-bottom:16px">FDs, EPF, PPF, real estate, physical gold, crypto, savings. Changes sync to Google Sheets.</p>
+      <p style="font-size:13px;color:var(--ink2);margin-bottom:12px">FDs, EPF, PPF, real estate, physical gold, crypto, savings. Changes sync to Google Sheets.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px">
+        ${MEMBERS.map(m=>`<div style="font-size:11px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:5px 10px;line-height:1.6">
+          <strong style="font-size:12px">${m.name}</strong><br>
+          CAS: <span style="color:${S.casLoaded[m.id]?'var(--green)':'var(--ink3)'}">${S.casDate[m.id]||'pending'}</span><br>
+          Manual: <span style="color:${S.manualDate[m.id]?'var(--ink2)':'var(--ink3)'}">${S.manualDate[m.id]||'not entered'}</span>
+        </div>`).join('')}
+      </div>
       <div class="form-grid">
         <div class="form-group">
           <div class="form-label">Member</div>
@@ -921,7 +990,7 @@ function renderManual() {
         </div>
         <div class="form-group">
           <div class="form-label">Current value (₹)</div>
-          <input type="number" id="man-value" placeholder="e.g. 500000" min="0">
+          <input type="text" inputmode="numeric" id="man-value" placeholder="e.g. 5,00,000">
         </div>
       </div>
 
@@ -991,7 +1060,7 @@ function renderManual() {
     }
   }
   function updateNPSPreview(pct) {
-    const v = parseFloat(document.getElementById('man-value').value)||0;
+    const v = parseFloat((document.getElementById('man-value').value||'').replace(/,/g,''))||0;
     npsPreview.textContent = v>0
       ? `${pct}% equity (${fmt(v*pct/100)}) / ${100-pct}% debt (${fmt(v*(100-pct)/100)})`
       : `${pct}% equity / ${100-pct}% debt`;
@@ -1005,7 +1074,10 @@ function renderManual() {
     npsEqVal.textContent = pct+'%';
     updateNPSPreview(pct);
   });
-  document.getElementById('man-value').addEventListener('input', () => {
+  document.getElementById('man-value').addEventListener('input', (e) => {
+    const el = e.target;
+    const digits = el.value.replace(/[^\d]/g,'');
+    el.value = formatIndian(digits);
     if(assetSel.value==='nps') updateNPSPreview(parseInt(slider.value));
     document.getElementById('man-err').textContent='';
   });
@@ -1018,11 +1090,12 @@ function renderManual() {
   document.getElementById('man-save').addEventListener('click', async () => {
     const mid = memberSel.value, aid = assetSel.value;
     const raw = document.getElementById('man-value').value.trim();
-    const val = parseFloat(raw);
+    const val = parseFloat(raw.replace(/,/g,''));
     const errEl = document.getElementById('man-err'), statEl = document.getElementById('man-status');
     errEl.textContent=''; statEl.textContent='';
     if(raw===''||isNaN(val)||val<0) { errEl.textContent='Enter a valid amount.'; return; }
     S.assets[mid][aid] = val;
+    S.manualDate[mid] = monthYear();
     const mName=MEMBERS.find(m=>m.id===mid).name, aName=ASSET_CLASSES.find(a=>a.id===aid).name;
     let extra='';
     if(aid==='nps') { const p=S.npsEqPct[mid]; extra=` → ${fmt(val*p/100)} eq + ${fmt(val*(100-p)/100)} debt`; }
