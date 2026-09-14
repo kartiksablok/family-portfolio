@@ -340,7 +340,7 @@ const CONFIG = {
     <div class="topbar-right">
       <span class="period-badge" id="period-badge">–</span>
       <span id="sync-warn" style="display:none;background:#fef3c7;color:#92400e;font-size:11px;font-weight:600;padding:3px 8px;border-radius:4px;border:1px solid #fcd34d" title="Sheets could not be reached - showing cached data">⚠ offline cache</span>
-      <button onclick="loadFromSheets().then(()=>alert('Refreshed from Sheets.'))" style="font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--ink2);cursor:pointer">↻ Refresh</button>
+      <button onclick="refreshFromSheets(this)" style="font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--ink2);cursor:pointer">↻ Refresh</button>
       <button class="lock-btn" onclick="lockApp()">Lock</button>
     </div>
   </div>
@@ -641,20 +641,27 @@ async function writeToSheets() {
   });
   rows[1][headers.length-1] = now; // last_updated on first member row only
 
-  const body = { values: rows };
-  await fetch(`${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_PORTFOLIO}!A1?valueInputOption=RAW`, {
+  const r1 = await fetch(`${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_PORTFOLIO}!A1?valueInputOption=RAW`, {
     method: 'PUT',
     headers: { 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
-    body: JSON.stringify(body)
+    body: JSON.stringify({ values: rows })
   });
+  if(!r1.ok) {
+    const errBody = await r1.json().catch(()=>({}));
+    throw new Error(`Portfolio write failed ${r1.status}: ${errBody?.error?.message||r1.statusText}`);
+  }
 
   // Config rows
   const configRows = [['member','nps_equity_pct'], ...MEMBERS.map(m=>[m.id, S.npsEqPct[m.id]])];
-  await fetch(`${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_CONFIG}!A1?valueInputOption=RAW`, {
+  const r2 = await fetch(`${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_CONFIG}!A1?valueInputOption=RAW`, {
     method: 'PUT',
     headers: { 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
     body: JSON.stringify({ values: configRows })
   });
+  if(!r2.ok) {
+    const errBody = await r2.json().catch(()=>({}));
+    throw new Error(`Config write failed ${r2.status}: ${errBody?.error?.message||r2.statusText}`);
+  }
 
   S.lastUpdated = now;
   updatePeriodBadge();
@@ -672,7 +679,36 @@ async function appendHistoryToSheet(entry) {
 
 function updatePeriodBadge() {
   const el = document.getElementById('period-badge');
-  if(el) el.textContent = S.lastUpdated ? 'Updated '+S.lastUpdated.split(',')[0] : 'Not synced';
+  if(el) el.textContent = S.lastUpdated ? 'Saved '+S.lastUpdated.split(',')[0] : 'Not synced';
+}
+
+async function refreshFromSheets(btn) {
+  const orig = btn.textContent;
+  btn.textContent = '↻ Loading...';
+  btn.disabled = true;
+  const warnEl = document.getElementById('sync-warn');
+  try {
+    const url = `${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_PORTFOLIO}?key=${CONFIG.API_KEY}`;
+    const r = await fetch(url);
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    if(!data.values || data.values.length < 2) throw new Error('Sheet is empty or has no data rows - make sure you have saved data at least once from this dashboard.');
+    parseSheetPortfolio(data.values);
+    await loadHistoryFromSheet();
+    await loadConfigFromSheet();
+    if(warnEl) warnEl.style.display='none';
+    renderAll();
+    saveLocal();
+    btn.textContent = '✓ Synced';
+    setTimeout(()=>{ btn.textContent=orig; btn.disabled=false; }, 2000);
+  } catch(e) {
+    console.warn('Refresh failed:', e);
+    if(warnEl) { warnEl.style.display='inline-block'; warnEl.title=String(e); }
+    btn.textContent = '✗ Failed';
+    btn.style.color = 'var(--red)';
+    setTimeout(()=>{ btn.textContent=orig; btn.disabled=false; btn.style.color=''; }, 3000);
+    alert('Could not load from Sheets:\n\n'+e.message+'\n\nCheck the browser console (F12 → Console) for details.');
+  }
 }
 
 /* ── CAS PARSING ── */
