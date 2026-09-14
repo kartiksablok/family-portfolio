@@ -339,6 +339,8 @@ const CONFIG = {
     <div class="topbar-brand">Family portfolio</div>
     <div class="topbar-right">
       <span class="period-badge" id="period-badge">–</span>
+      <span id="sync-warn" style="display:none;background:#fef3c7;color:#92400e;font-size:11px;font-weight:600;padding:3px 8px;border-radius:4px;border:1px solid #fcd34d" title="Sheets could not be reached - showing cached data">⚠ offline cache</span>
+      <button onclick="loadFromSheets().then(()=>alert('Refreshed from Sheets.'))" style="font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--ink2);cursor:pointer">↻ Refresh</button>
       <button class="lock-btn" onclick="lockApp()">Lock</button>
     </div>
   </div>
@@ -525,17 +527,22 @@ const SHEET_BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
 
 async function loadFromSheets() {
   if(CONFIG.SHEET_ID==='YOUR_GOOGLE_SHEET_ID') return; // not configured yet
+  const warnEl = document.getElementById('sync-warn');
   try {
     const url = `${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_PORTFOLIO}?key=${CONFIG.API_KEY}`;
     const r = await fetch(url);
-    if(!r.ok) return;
+    if(!r.ok) throw new Error('HTTP '+r.status);
     const data = await r.json();
     parseSheetPortfolio(data.values || []);
     await loadHistoryFromSheet();
     await loadConfigFromSheet();
+    if(warnEl) warnEl.style.display='none';
     renderAll();
     saveLocal();
-  } catch(e) { console.warn('Sheets load failed:', e); }
+  } catch(e) {
+    console.warn('Sheets load failed:', e);
+    if(warnEl) warnEl.style.display='inline-block';
+  }
 }
 
 function parseSheetPortfolio(rows) {
@@ -551,7 +558,11 @@ function parseSheetPortfolio(rows) {
         S.assets[memberId][h] = parseFloat(row[j])||0;
       }
     });
-    S.casLoaded[memberId] = (row[headers.indexOf('cas_loaded')]||'').toLowerCase()==='true';
+    S.casLoaded[memberId]  = (row[headers.indexOf('cas_loaded')]||'').toLowerCase()==='true';
+    const cdIdx = headers.indexOf('cas_date');
+    if(cdIdx>0) S.casDate[memberId]    = row[cdIdx]||null;
+    const mdIdx = headers.indexOf('manual_date');
+    if(mdIdx>0) S.manualDate[memberId] = row[mdIdx]||null;
   }
   const luIdx = rows[0].findIndex(h=>h.toLowerCase()==='last_updated');
   if(luIdx>0 && rows[1]) S.lastUpdated = rows[1][luIdx]||null;
@@ -622,10 +633,10 @@ async function writeToSheets() {
   const now = new Date().toLocaleString('en-IN', {timeZone:'Asia/Kolkata'});
   // Build portfolio rows
   const assetIds = ASSET_CLASSES.map(a=>a.id);
-  const headers = ['member', ...assetIds, 'cas_loaded', 'last_updated'];
+  const headers = ['member', ...assetIds, 'cas_loaded', 'cas_date', 'manual_date', 'last_updated'];
   const rows = [headers];
   MEMBERS.forEach(m => {
-    const row = [m.id, ...assetIds.map(id=>S.assets[m.id][id]||0), S.casLoaded[m.id]?'TRUE':'FALSE', ''];
+    const row = [m.id, ...assetIds.map(id=>S.assets[m.id][id]||0), S.casLoaded[m.id]?'TRUE':'FALSE', S.casDate[m.id]||'', S.manualDate[m.id]||'', ''];
     rows.push(row);
   });
   rows[1][headers.length-1] = now; // last_updated on first member row only
