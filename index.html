@@ -286,7 +286,7 @@
 <body>
 
 <!-- ═══════════════════════════════════════════════════════════
-     CONFIGURATION — edit these values before using the app
+     CONFIGURATION - edit these values before using the app
 ═══════════════════════════════════════════════════════════ -->
 <script>
 const CONFIG = {
@@ -380,10 +380,10 @@ const MEMBERS = [
   { id:'mother', name:'Mother',  initials:'M', color:'#d97706', bg:'#fef3c7', tc:'#78350f' }
 ];
 const ASSET_CLASSES = [
-  { id:'mf_equity',   name:'MF — equity',      color:'#2563eb', type:'equity' },
+  { id:'mf_equity',   name:'MF - equity',      color:'#2563eb', type:'equity' },
   { id:'stocks',      name:'Stocks',            color:'#3b82f6', type:'equity' },
   { id:'crypto',      name:'Crypto',            color:'#ef4444', type:'equity' },
-  { id:'mf_debt',     name:'MF — debt',         color:'#7c3aed', type:'debt'   },
+  { id:'mf_debt',     name:'MF - debt',         color:'#7c3aed', type:'debt'   },
   { id:'bonds',       name:'Bonds / NCDs',       color:'#8b5cf6', type:'debt'   },
   { id:'fd',          name:'FDs / RDs',          color:'#6b7280', type:'debt'   },
   { id:'epf',         name:'EPF',               color:'#d97706', type:'debt'   },
@@ -397,6 +397,7 @@ const MANUAL_IDS = ['fd','epf','ppf','real_estate','gold','crypto','savings','np
 const ZERO = () => Object.fromEntries([...ASSET_CLASSES.map(a=>[a.id,0])]);
 
 /* ── STATE ── */
+let assetMemberFilter = 'all';
 let S = {
   assets: { kartik:ZERO(), spouse:ZERO(), father:ZERO(), mother:ZERO() },
   npsEqPct: { kartik:75, spouse:75, father:75, mother:75 },
@@ -721,12 +722,12 @@ function renderOverview() {
   const pending = MEMBERS.filter(m=>!S.casLoaded[m.id]).map(m=>m.name);
   el.innerHTML = `
     ${isNotConfigured()?setupNotice():''}
-    ${pending.length ? `<div class="warn-banner">⚠ CAS not yet loaded for: <strong>${pending.join(', ')}</strong> — go to Upload CAS</div>` : ''}
+    ${pending.length ? `<div class="warn-banner">⚠ CAS not yet loaded for: <strong>${pending.join(', ')}</strong> - go to Upload CAS</div>` : ''}
     <div class="metric-row">
       <div class="metric"><div class="metric-label">Family net worth</div><div class="metric-value">${fmt(gt)}</div><div class="metric-sub">${MEMBERS.filter(m=>mTotal(m.id)>0).map(m=>m.name).join(' + ')||'No data yet'}</div></div>
-      <div class="metric"><div class="metric-label">Equity</div><div class="metric-value" style="color:var(--eq)">${fmt(eq)}</div><div class="metric-sub">${gt?((eq/gt)*100).toFixed(1)+'%':'—'}</div></div>
-      <div class="metric"><div class="metric-label">Debt + fixed</div><div class="metric-value" style="color:var(--debt)">${fmt(dbt)}</div><div class="metric-sub">${gt?((dbt/gt)*100).toFixed(1)+'%':'—'}</div></div>
-      <div class="metric"><div class="metric-label">Real assets</div><div class="metric-value" style="color:var(--gold)">${fmt(oth)}</div><div class="metric-sub">${gt?((oth/gt)*100).toFixed(1)+'%':'—'}</div></div>
+      <div class="metric"><div class="metric-label">Equity</div><div class="metric-value" style="color:var(--eq)">${fmt(eq)}</div><div class="metric-sub">${gt?((eq/gt)*100).toFixed(1)+'%':'-'}</div></div>
+      <div class="metric"><div class="metric-label">Debt + fixed</div><div class="metric-value" style="color:var(--debt)">${fmt(dbt)}</div><div class="metric-sub">${gt?((dbt/gt)*100).toFixed(1)+'%':'-'}</div></div>
+      <div class="metric"><div class="metric-label">Real assets</div><div class="metric-value" style="color:var(--gold)">${fmt(oth)}</div><div class="metric-sub">${gt?((oth/gt)*100).toFixed(1)+'%':'-'}</div></div>
     </div>
     <div class="chart-grid">
       <div class="card"><div class="card-title">By member</div>
@@ -756,7 +757,7 @@ function renderMembers() {
       return `<div class="member-card">
         <div class="m-avatar" style="background:${m.bg};color:${m.tc}">${m.initials}</div>
         <div class="m-name">${m.name}</div>
-        <div class="m-amt">${t>0?fmt(t):'—'}</div>
+        <div class="m-amt">${t>0?fmt(t):'-'}</div>
         <div class="m-pct">${t>0&&gt>0?((t/gt)*100).toFixed(1)+'% of family':''}</div>
         ${nps>0?`<div style="font-size:11px;color:var(--ink3);margin-top:3px">NPS: ${S.npsEqPct[m.id]}% eq / ${100-S.npsEqPct[m.id]}% debt</div>`:''}
         <div class="m-status ${S.casLoaded[m.id]?'ok':'pending'}">${S.casLoaded[m.id]?'✓ CAS: '+(S.casDate[m.id]||'loaded'):'CAS pending'}</div>
@@ -776,23 +777,40 @@ function renderMembers() {
 /* ── ASSET CLASSES ── */
 function renderAssets() {
   const el = document.getElementById('tab-assets');
-  const gt = gTotal();
-  const sorted = ASSET_CLASSES.filter(a=>aTotal(a.id)>0).sort((a,b)=>aTotal(b.id)-aTotal(a.id));
-  if(!sorted.length) { el.innerHTML='<div class="card" style="text-align:center;padding:40px;color:var(--ink3)">No asset data yet. Upload CAS files to get started.</div>'; return; }
-  el.innerHTML = `<div class="chart-grid">
-    <div class="card"><div class="card-title">All asset classes</div>
-      ${sorted.map(a=>{ const t=aTotal(a.id), p=((t/gt)*100).toFixed(1); return `<div class="asset-list-row">
+  // filtered helpers
+  const fGrand = () => assetMemberFilter === 'all' ? gTotal() : mTotal(assetMemberFilter);
+  const fAmt   = (aid) => assetMemberFilter === 'all' ? aTotal(aid) : (S.assets[assetMemberFilter][aid] || 0);
+  const gt = fGrand();
+  const sorted = ASSET_CLASSES.filter(a=>fAmt(a.id)>0).sort((a,b)=>fAmt(b.id)-fAmt(a.id));
+  // filter pills HTML
+  const pills = `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">
+    ${[{id:'all',name:'All',bg:'#1e293b',tc:'#fff'},...MEMBERS].map(m=>{
+      const active = assetMemberFilter===m.id;
+      const bg = active ? m.bg : 'transparent';
+      const color = active ? m.tc : 'var(--ink2)';
+      const border = active ? m.bg : 'var(--line)';
+      return `<button onclick="assetMemberFilter='${m.id}';renderAssets()" style="padding:4px 14px;border-radius:20px;border:1.5px solid ${border};background:${bg};color:${color};font-size:13px;font-weight:600;cursor:pointer;transition:all .15s">${m.name}</button>`;
+    }).join('')}
+  </div>`;
+  if(!sorted.length) {
+    el.innerHTML = pills + '<div class="card" style="text-align:center;padding:40px;color:var(--ink3)">No asset data yet. Upload CAS files to get started.</div>';
+    return;
+  }
+  const titleLabel = assetMemberFilter === 'all' ? 'All members' : MEMBERS.find(m=>m.id===assetMemberFilter).name;
+  el.innerHTML = pills + `<div class="chart-grid">
+    <div class="card"><div class="card-title">Asset classes - ${titleLabel}</div>
+      ${sorted.map(a=>{ const t=fAmt(a.id), p=((t/gt)*100).toFixed(1); return `<div class="asset-list-row">
         <div class="a-dot" style="background:${a.color}"></div>
         <div class="a-name">${a.name}</div>
         <div class="a-bar-wrap"><div class="a-bar-bg"><div class="a-bar-fill" style="width:${p}%;background:${a.color}"></div></div></div>
         <div class="a-amt">${fmt(t)}</div><div class="a-pct">${p}%</div></div>`; }).join('')}
     </div>
-    <div class="card"><div class="card-title">Distribution</div>
+    <div class="card"><div class="card-title">Distribution - ${titleLabel}</div>
       <div class="legend">${sorted.map(a=>`<span class="legend-item"><span class="legend-dot" style="background:${a.color}"></span>${a.name}</span>`).join('')}</div>
       <div style="position:relative;height:220px"><canvas id="assetD" role="img" aria-label="Asset distribution"></canvas></div>
     </div></div>`;
   dc('ad');
-  charts['ad'] = new Chart(document.getElementById('assetD'), { type:'doughnut', data:{ labels:sorted.map(a=>a.name), datasets:[{ data:sorted.map(a=>aTotal(a.id)), backgroundColor:sorted.map(a=>a.color), borderWidth:2, borderColor:BW }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>` ${c.label}: ${fmtS(c.raw)}`}} } } });
+  charts['ad'] = new Chart(document.getElementById('assetD'), { type:'doughnut', data:{ labels:sorted.map(a=>a.name), datasets:[{ data:sorted.map(a=>fAmt(a.id)), backgroundColor:sorted.map(a=>a.color), borderWidth:2, borderColor:BW }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>` ${c.label}: ${fmtS(c.raw)}`}} } } });
 }
 
 /* ── DEBT / EQUITY ── */
@@ -829,11 +847,11 @@ function renderDebtequity() {
     <div class="chart-grid">
       <div class="card"><div class="card-title">Inside equity</div>
         ${ASSET_CLASSES.filter(a=>a.type==='equity'&&aTotal(a.id)>0).map(a=>`<div class="asset-list-row"><div class="a-dot" style="background:${a.color}"></div><div class="a-name">${a.name}</div><div class="a-amt">${fmt(aTotal(a.id))}</div><div class="a-pct">${((aTotal(a.id)/eq)*100).toFixed(1)}%</div></div>`).join('')}
-        ${MEMBERS.filter(m=>S.assets[m.id].nps>0).map(m=>{ const v=S.assets[m.id].nps*npsEq(m.id); return `<div class="asset-list-row"><div class="a-dot" style="background:#059669"></div><div class="a-name">NPS — ${m.name} (${S.npsEqPct[m.id]}%)</div><div class="a-amt">${fmt(v)}</div><div class="a-pct">${((v/eq)*100).toFixed(1)}%</div></div>`; }).join('')}
+        ${MEMBERS.filter(m=>S.assets[m.id].nps>0).map(m=>{ const v=S.assets[m.id].nps*npsEq(m.id); return `<div class="asset-list-row"><div class="a-dot" style="background:#059669"></div><div class="a-name">NPS - ${m.name} (${S.npsEqPct[m.id]}%)</div><div class="a-amt">${fmt(v)}</div><div class="a-pct">${((v/eq)*100).toFixed(1)}%</div></div>`; }).join('')}
       </div>
       <div class="card"><div class="card-title">Inside debt / fixed</div>
         ${ASSET_CLASSES.filter(a=>a.type==='debt'&&aTotal(a.id)>0).map(a=>`<div class="asset-list-row"><div class="a-dot" style="background:${a.color}"></div><div class="a-name">${a.name}</div><div class="a-amt">${fmt(aTotal(a.id))}</div><div class="a-pct">${((aTotal(a.id)/dbt)*100).toFixed(1)}%</div></div>`).join('')}
-        ${MEMBERS.filter(m=>S.assets[m.id].nps>0).map(m=>{ const v=S.assets[m.id].nps*npsDt(m.id); return `<div class="asset-list-row"><div class="a-dot" style="background:#059669"></div><div class="a-name">NPS — ${m.name} (${100-S.npsEqPct[m.id]}%)</div><div class="a-amt">${fmt(v)}</div><div class="a-pct">${((v/dbt)*100).toFixed(1)}%</div></div>`; }).join('')}
+        ${MEMBERS.filter(m=>S.assets[m.id].nps>0).map(m=>{ const v=S.assets[m.id].nps*npsDt(m.id); return `<div class="asset-list-row"><div class="a-dot" style="background:#059669"></div><div class="a-name">NPS - ${m.name} (${100-S.npsEqPct[m.id]}%)</div><div class="a-amt">${fmt(v)}</div><div class="a-pct">${((v/dbt)*100).toFixed(1)}%</div></div>`; }).join('')}
       </div>
     </div>`;
   dc('de'); dc('dem');
@@ -886,7 +904,7 @@ function renderUpload() {
       <div class="form-grid" style="margin-bottom:14px">
         <div class="form-group">
           <div class="form-label">Member to reset</div>
-          <select id="reset-member">${MEMBERS.map(m=>`<option value="${m.id}">${m.name}${(S.casLoaded[m.id]||S.manualDate[m.id])?(' — '+fmt(mTotal(m.id))):'  (no data)'}</option>`).join('')}</select>
+          <select id="reset-member">${MEMBERS.map(m=>`<option value="${m.id}">${m.name}${(S.casLoaded[m.id]||S.manualDate[m.id])?(' - '+fmt(mTotal(m.id))):'  (no data)'}</option>`).join('')}</select>
         </div>
       </div>
       <button class="btn" id="reset-btn" style="color:var(--red);border-color:#fecaca">Reset all data for this member</button>
@@ -905,7 +923,7 @@ function renderUpload() {
       try {
         const data = JSON.parse(e.target.result);
         const total = parseCASJson(data, mid);
-        statEl.innerHTML = `<div class="ok-msg">✓ Parsed ${mName}'s CAS — ${fmt(total)} total.</div>`;
+        statEl.innerHTML = `<div class="ok-msg">✓ Parsed ${mName}'s CAS - ${fmt(total)} total.</div>`;
         if(CONFIG.SHEET_ID !== 'YOUR_GOOGLE_SHEET_ID') {
           statEl.innerHTML += '<div style="font-size:12px;color:var(--ink3);margin-top:4px"><span class="spinner"></span>Saving to Google Sheets...</div>';
           try {
@@ -915,7 +933,7 @@ function renderUpload() {
             statEl.innerHTML += `<div class="err">Sheets sync failed: ${e}. Data saved locally.</div>`;
           }
         } else {
-          statEl.innerHTML += '<div style="font-size:12px;color:var(--ink3);margin-top:4px">Google Sheets not configured — saved locally only.</div>';
+          statEl.innerHTML += '<div style="font-size:12px;color:var(--ink3);margin-top:4px">Google Sheets not configured - saved locally only.</div>';
         }
         saveLocal();
         renderUpload();
@@ -948,7 +966,7 @@ function renderUpload() {
         statEl.innerHTML = `<span style="color:var(--red)">Cleared locally. Sheets sync failed: ${e}</span>`;
       }
     } else {
-      statEl.innerHTML = `<span style="color:var(--green)">✓ ${mName}'s data has been reset (locally only — Sheets not configured).</span>`;
+      statEl.innerHTML = `<span style="color:var(--green)">✓ ${mName}'s data has been reset (locally only - Sheets not configured).</span>`;
     }
     renderUpload();
     renderOverview();
@@ -961,7 +979,7 @@ function renderManual() {
   const savedRows = ASSET_CLASSES.filter(a=>MEMBERS.some(m=>S.assets[m.id][a.id]>0));
   el.innerHTML = `
     <div class="card">
-      <div class="card-title">Manual entry — assets not in CAS</div>
+      <div class="card-title">Manual entry - assets not in CAS</div>
       <p style="font-size:13px;color:var(--ink2);margin-bottom:12px">FDs, EPF, PPF, real estate, physical gold, crypto, savings. Changes sync to Google Sheets.</p>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px">
         ${MEMBERS.map(m=>`<div style="font-size:11px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:5px 10px;line-height:1.6">
@@ -1027,13 +1045,13 @@ function renderManual() {
         <tbody>
           ${savedRows.map(a=>`<tr>
             <td style="display:flex;align-items:center;gap:6px"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${a.color};flex-shrink:0"></span>${a.name}${a.id==='nps'?` <span style="font-size:10px;color:var(--ink3)">(split)</span>`:''}</td>
-            ${MEMBERS.map(m=>{ const v=S.assets[m.id][a.id]; return `<td class="r">${v>0?fmt(v):'—'}</td>`; }).join('')}
+            ${MEMBERS.map(m=>{ const v=S.assets[m.id][a.id]; return `<td class="r">${v>0?fmt(v):'-'}</td>`; }).join('')}
             <td class="r">${fmt(aTotal(a.id))}</td>
           </tr>`).join('')}
         </tbody>
         <tfoot><tr class="total-row">
           <td>Total</td>
-          ${MEMBERS.map(m=>`<td class="r">${mTotal(m.id)>0?fmt(mTotal(m.id)):'—'}</td>`).join('')}
+          ${MEMBERS.map(m=>`<td class="r">${mTotal(m.id)>0?fmt(mTotal(m.id)):'-'}</td>`).join('')}
           <td class="r">${fmt(gTotal())}</td>
         </tr></tfoot>
       </table></div>
@@ -1103,10 +1121,10 @@ function renderManual() {
     saveLocal();
     if(CONFIG.SHEET_ID !== 'YOUR_GOOGLE_SHEET_ID') {
       statEl.textContent='Saving...';
-      try { await writeToSheets(); statEl.textContent=`✓ Saved: ${mName} — ${aName} → ${fmt(val)}${extra}`; }
+      try { await writeToSheets(); statEl.textContent=`✓ Saved: ${mName} - ${aName} → ${fmt(val)}${extra}`; }
       catch(e) { statEl.textContent=`✓ Saved locally. Sheets sync failed: ${e}`; }
     } else {
-      statEl.textContent=`✓ Saved: ${mName} — ${aName} → ${fmt(val)}${extra}`;
+      statEl.textContent=`✓ Saved: ${mName} - ${aName} → ${fmt(val)}${extra}`;
     }
     renderManual();
   });
@@ -1184,7 +1202,7 @@ function renderAdvice() {
         Then ask for SIP recommendations, rebalancing advice, or allocation analysis.
       </p>
       <div class="advice-box">
-        <div class="advice-title">Portfolio summary — ready to paste into Claude</div>
+        <div class="advice-title">Portfolio summary - ready to paste into Claude</div>
         <div class="advice-body" id="advice-text">${summary}</div>
       </div>
       <div class="btn-row">
@@ -1213,7 +1231,7 @@ function buildAdviceSummary() {
   const gt=gTotal(), eq=totEq(), dbt=totDbt(), oth=totOth();
   const lines = [
     `FAMILY PORTFOLIO SUMMARY`,
-    `Last updated: ${S.lastUpdated||'—'}`,
+    `Last updated: ${S.lastUpdated||'-'}`,
     ``,
     `TOTAL NET WORTH: ${fmt(gt)}`,
     `  Equity (incl. NPS split): ${fmt(eq)} (${gt?((eq/gt)*100).toFixed(1):'0'}%)`,
@@ -1281,7 +1299,7 @@ function renderSetup() {
     </div>
 
     <div class="card">
-      <div class="card-title">Step 1 — create the Google Sheet</div>
+      <div class="card-title">Step 1 - create the Google Sheet</div>
       <ol style="font-size:13px;line-height:2;padding-left:18px;color:var(--ink2)">
         <li>Go to <strong>sheets.google.com</strong> → create a new blank sheet</li>
         <li>Rename the first tab (bottom left) to: <code>portfolio</code></li>
@@ -1301,7 +1319,7 @@ function renderSetup() {
     </div>
 
     <div class="card">
-      <div class="card-title">Step 2 — get a Google API key (read access for all family)</div>
+      <div class="card-title">Step 2 - get a Google API key (read access for all family)</div>
       <ol style="font-size:13px;line-height:2;padding-left:18px;color:var(--ink2)">
         <li>Go to <a href="https://console.cloud.google.com" target="_blank" style="color:var(--eq)">console.cloud.google.com</a></li>
         <li>Create a new project (top bar → dropdown → New Project). Name it anything.</li>
@@ -1317,7 +1335,7 @@ function renderSetup() {
     </div>
 
     <div class="card">
-      <div class="card-title">Step 3 — get an OAuth client ID (write access for you, the admin)</div>
+      <div class="card-title">Step 3 - get an OAuth client ID (write access for you, the admin)</div>
       <ol style="font-size:13px;line-height:2;padding-left:18px;color:var(--ink2)">
         <li>Still in Google Cloud Console → <strong>APIs & Services → Credentials</strong></li>
         <li>Create Credentials → <strong>OAuth 2.0 Client ID</strong></li>
@@ -1334,12 +1352,12 @@ function renderSetup() {
     </div>
 
     <div class="card">
-      <div class="card-title">Step 4 — change the PIN</div>
+      <div class="card-title">Step 4 - change the PIN</div>
       <p style="font-size:13px;color:var(--ink2)">Open the HTML file in Notepad or VS Code. Find the <code>CONFIG</code> block near the top. Change <code>PIN: '1234'</code> to your chosen 4-digit PIN. Save the file.</p>
     </div>
 
     <div class="card">
-      <div class="card-title">Step 5 — host on GitHub Pages</div>
+      <div class="card-title">Step 5 - host on GitHub Pages</div>
       <ol style="font-size:13px;line-height:2;padding-left:18px;color:var(--ink2)">
         <li>Go to <a href="https://github.com" target="_blank" style="color:var(--eq)">github.com</a> → sign in or create a free account</li>
         <li>Click <strong>New repository</strong> → name it e.g. <code>family-portfolio</code> → set to <strong>Public</strong> → Create</li>
@@ -1348,7 +1366,7 @@ function renderSetup() {
         <li>Commit the file (green button at the bottom)</li>
         <li>Go to <strong>Settings → Pages</strong> → Source: <em>Deploy from branch</em> → Branch: <em>main</em> → Save</li>
         <li>Wait ~2 minutes → your URL will be: <code>https://yourusername.github.io/family-portfolio</code></li>
-        <li>Share this URL with family — they enter the PIN and see the dashboard</li>
+        <li>Share this URL with family - they enter the PIN and see the dashboard</li>
       </ol>
       <div style="background:#f0fdf4;border-radius:6px;padding:10px;font-size:12px;color:#14532d;margin-top:8px">
         ✓ GitHub Pages is free forever. The URL is permanent. No server to maintain.
@@ -1358,7 +1376,7 @@ function renderSetup() {
     <div class="card">
       <div class="card-title">Troubleshooting</div>
       <div style="font-size:13px;color:var(--ink2);line-height:1.8">
-        <p><strong>CORS error on Sheets:</strong> Make sure the sheet is shared as "Anyone with the link — Viewer"</p>
+        <p><strong>CORS error on Sheets:</strong> Make sure the sheet is shared as "Anyone with the link - Viewer"</p>
         <p><strong>OAuth popup blocked:</strong> Allow popups for your GitHub Pages domain in browser settings</p>
         <p><strong>OAuth error "Access blocked":</strong> Add your Google account as a Test user in the OAuth consent screen</p>
         <p><strong>Data not updating:</strong> Hard-refresh with Ctrl+Shift+R to clear cached data</p>
@@ -1397,7 +1415,7 @@ const renders = {
 
 <!--
 ═══════════════════════════════════════════════════════════════
-  SETUP GUIDE — ONE TIME, ~15 MINUTES
+  SETUP GUIDE - ONE TIME, ~15 MINUTES
 ═══════════════════════════════════════════════════════════════
 
 STEP 1: Create the Google Sheet
@@ -1412,7 +1430,7 @@ STEP 1: Create the Google Sheet
      https://docs.google.com/spreadsheets/d/[THIS PART]/edit
      Paste it as SHEET_ID in the CONFIG block at the top of this file.
 
-STEP 2: Get a Google API key (for reading — family members)
+STEP 2: Get a Google API key (for reading - family members)
   1. Go to console.cloud.google.com
   2. Create a new project (or use an existing one)
   3. Enable "Google Sheets API" (APIs & Services → Library → search Sheets)
@@ -1420,14 +1438,14 @@ STEP 2: Get a Google API key (for reading — family members)
   5. Click the key → restrict it to "Google Sheets API" and your GitHub Pages domain
   6. Paste the key as API_KEY in CONFIG above
 
-STEP 3: Get an OAuth Client ID (for writing — you, the admin)
+STEP 3: Get an OAuth Client ID (for writing - you, the admin)
   1. Still in Credentials → Create Credentials → OAuth 2.0 Client ID
   2. Choose "Web application"
   3. Add your GitHub Pages URL to Authorized JavaScript origins
      (e.g. https://yourusername.github.io)
   4. Copy the Client ID → paste as OAUTH_CLIENT_ID in CONFIG above
   5. Make the Google Sheet shareable: Share → Anyone with link → Viewer
-     (OAuth handles writer auth — the sheet itself can stay viewer-public)
+     (OAuth handles writer auth - the sheet itself can stay viewer-public)
 
 STEP 4: Change the PIN
   Change CONFIG.PIN from '1234' to a 4-digit PIN of your choice.
@@ -1438,7 +1456,7 @@ STEP 5: Host on GitHub Pages
   3. Upload this HTML file, rename it to index.html
   4. Settings → Pages → Source: main branch → Save
   5. Your URL will be: https://yourusername.github.io/family-portfolio
-  6. Share this URL with family — they use it to view the dashboard
+  6. Share this URL with family - they use it to view the dashboard
   7. Only you need OAuth to upload data; family can read with the API key
 
 TROUBLESHOOTING
