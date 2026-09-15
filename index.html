@@ -658,7 +658,8 @@ function parseSheetPortfolio(rows) {
     });
 
     const clIdx = headers.indexOf('cas_loaded');
-    if(clIdx >= 0) newCasLoaded[memberId] = (row[clIdx]||'').toLowerCase() === 'true';
+    // UNFORMATTED_VALUE returns booleans as native true/false; FORMATTED_VALUE returns "TRUE"/"FALSE" strings
+    if(clIdx >= 0) { const cl = row[clIdx]; newCasLoaded[memberId] = cl === true || String(cl).toLowerCase() === 'true'; }
     const cdIdx = headers.indexOf('cas_date');
     if(cdIdx >= 0) newCasDate[memberId] = row[cdIdx] || null;
     const mdIdx = headers.indexOf('manual_date');
@@ -846,7 +847,7 @@ async function pushToSheets(btn) {
     // Safety check: always fetch Sheet before overwriting — regardless of whether we have a prior revision.
     // This prevents a fresh browser (sheetRevision=null) from silently clobbering good Sheet data.
     try {
-      const vUrl = `${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_PORTFOLIO}?key=${CONFIG.API_KEY}`;
+      const vUrl = `${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_PORTFOLIO}?key=${CONFIG.API_KEY}&valueRenderOption=UNFORMATTED_VALUE`;
       const vr = await fetch(vUrl);
       if(vr.ok) {
         const vdata = await vr.json();
@@ -935,7 +936,9 @@ async function refreshFromSheets(btn) {
   const warnEl = document.getElementById('sync-warn');
   try {
     // Fetch all three tabs concurrently — must ALL succeed before we touch S
-    const key = `?key=${CONFIG.API_KEY}`;
+    // UNFORMATTED_VALUE: return raw numbers (not display strings like "10,884,814")
+    // so parseFloat works correctly on all numeric cells
+    const key = `?key=${CONFIG.API_KEY}&valueRenderOption=UNFORMATTED_VALUE`;
     const [pResp, hResp, cResp] = await Promise.all([
       fetch(`${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_PORTFOLIO}${key}`),
       fetch(`${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_HISTORY}${key}`),
