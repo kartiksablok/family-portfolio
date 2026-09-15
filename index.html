@@ -340,8 +340,8 @@ const CONFIG = {
     <div class="topbar-right">
       <span class="period-badge" id="period-badge">–</span>
       <span id="sync-warn" style="display:none;background:#fef3c7;color:#92400e;font-size:11px;font-weight:600;padding:3px 8px;border-radius:4px;border:1px solid #fcd34d" title="Sheets could not be reached - showing cached data">⚠ offline cache</span>
-      <button onclick="pushToSheets(this)" title="Push data from THIS browser to Google Sheets" style="font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--ink2);cursor:pointer">↑ Push</button>
-      <button onclick="refreshFromSheets(this)" title="Pull latest data from Google Sheets into this browser" style="font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--ink2);cursor:pointer">↓ Pull</button>
+      <button onclick="pushToSheets(this)" title="Push: save THIS browser's data to Google Sheets (so other browsers can pull it)" style="font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid #2563eb;background:transparent;color:#2563eb;cursor:pointer;font-weight:600">↑ Push</button>
+      <button onclick="refreshFromSheets(this)" title="Pull: load latest data from Google Sheets into this browser" style="font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--ink2);cursor:pointer">↓ Pull</button>
       <button class="lock-btn" onclick="lockApp()">Lock</button>
     </div>
   </div>
@@ -401,6 +401,7 @@ const ZERO = () => Object.fromEntries([...ASSET_CLASSES.map(a=>[a.id,0])]);
 
 /* ── STATE ── */
 let assetMemberFilter = 'all';
+let syncInFlight = false; // mutex: prevents Push and Pull from overlapping
 let S = {
   assets: { kartik:ZERO(), spouse:ZERO(), father:ZERO(), mother:ZERO() },
   npsEqPct: { kartik:75, spouse:75, father:75, mother:75 },
@@ -409,6 +410,7 @@ let S = {
   manualDate:{ kartik:null, spouse:null, father:null, mother:null },
   history: [],
   lastUpdated: null,
+  sheetRevision: null, // last_updated value we last confirmed was in the Sheet (for conflict detection)
   sheetReady: false,
   oauth: null,
 };
@@ -493,7 +495,9 @@ document.addEventListener('keydown', e => {
 function initApp() {
   loadLocal();
   renderAll();
-  loadFromSheets();
+  // Do NOT auto-pull from Sheets on load — local cache is authoritative.
+  // Use the ↓ Pull button to explicitly sync from Sheets.
+  // This prevents stale Sheet data from overwriting correct local data on refresh.
 }
 
 /* ── LOCAL STORAGE ── */
@@ -506,6 +510,7 @@ function saveLocal() {
     manualDate: S.manualDate,
     history: S.history,
     lastUpdated: S.lastUpdated,
+    sheetRevision: S.sheetRevision,
   }));
 }
 function loadLocal() {
@@ -513,14 +518,59 @@ function loadLocal() {
   if(!raw) return;
   try {
     const d = JSON.parse(raw);
-    if(d.assets)     S.assets     = d.assets;
-    if(d.npsEqPct)   S.npsEqPct   = d.npsEqPct;
-    if(d.casLoaded)  S.casLoaded  = d.casLoaded;
-    if(d.casDate)    S.casDate    = d.casDate;
-    if(d.manualDate) S.manualDate = d.manualDate;
-    if(d.history)    S.history    = d.history;
-    if(d.lastUpdated) S.lastUpdated = d.lastUpdated;
-  } catch(e) {}
+    // Normalize: ensure all expected members and asset classes exist even if schema evolved
+    const memberIds = MEMBERS.map(m=>m.id);
+    const assetIds  = ASSET_CLASSES.map(a=>a.id);
+    if(d.assets && typeof d.assets === 'object') {
+      memberIds.forEach(mid => {
+        if(d.assets[mid] && typeof d.assets[mid] === 'object') {
+          const normalized = ZERO();
+          assetIds.forEach(aid => {
+            const v = parseFloat(d.assets[mid][aid]);
+            normalized[aid] = isNaN(v) || v < 0 ? 0 : v;
+          });
+          S.assets[mid] = normalized;
+        }
+      });
+    }
+    // npsEqPct: validate and clamp to [0, 100]
+    if(d.npsEqPct && typeof d.npsEqPct === 'object') {
+      MEMBERS.forEach(m => {
+        if(d.npsEqPct.hasOwnProperty(m.id)) {
+          const v = parseFloat(d.npsEqPct[m.id]);
+          S.npsEqPct[m.id] = isNaN(v) ? 75 : Math.max(0, Math.min(100, Math.round(v)));
+        }
+      });
+    }
+    // casLoaded: coerce to strict boolean
+    if(d.casLoaded && typeof d.casLoaded === 'object') {
+      MEMBERS.forEach(m => {
+        if(d.casLoaded.hasOwnProperty(m.id)) S.casLoaded[m.id] = !!d.casLoaded[m.id];
+      });
+    }
+    // dates: string or null only
+    if(d.casDate && typeof d.casDate === 'object') {
+      MEMBERS.forEach(m => {
+        if(d.casDate.hasOwnProperty(m.id))
+          S.casDate[m.id] = typeof d.casDate[m.id] === 'string' ? d.casDate[m.id] : null;
+      });
+    }
+    if(d.manualDate && typeof d.manualDate === 'object') {
+      MEMBERS.forEach(m => {
+        if(d.manualDate.hasOwnProperty(m.id))
+          S.manualDate[m.id] = typeof d.manualDate[m.id] === 'string' ? d.manualDate[m.id] : null;
+      });
+    }
+    // history: validate each entry (string date, finite non-negative total)
+    if(Array.isArray(d.history)) {
+      S.history = d.history.filter(h =>
+        h && typeof h.date === 'string' && h.date &&
+        typeof h.total === 'number' && isFinite(h.total) && h.total >= 0
+      );
+    }
+    if(typeof d.lastUpdated === 'string' && d.lastUpdated)     S.lastUpdated   = d.lastUpdated;
+    if(typeof d.sheetRevision === 'string' && d.sheetRevision) S.sheetRevision = d.sheetRevision;
+  } catch(e) { console.warn('loadLocal failed, starting fresh:', e); }
 }
 
 /* ── GOOGLE SHEETS ── */
@@ -547,67 +597,129 @@ async function loadFromSheets() {
 }
 
 function parseSheetPortfolio(rows) {
-  if(rows.length<2) return;
-  const headers = rows[0].map(h=>h.toLowerCase().trim());
-  for(let i=1; i<rows.length; i++) {
-    const row = rows[i];
-    const memberId = (row[0]||'').toLowerCase().trim();
-    if(!S.assets[memberId]) continue;
-    headers.forEach((h,j) => {
-      if(j===0) return;
-      if(S.assets[memberId].hasOwnProperty(h)) {
-        S.assets[memberId][h] = parseFloat(row[j])||0;
-      }
-    });
-    S.casLoaded[memberId]  = (row[headers.indexOf('cas_loaded')]||'').toLowerCase()==='true';
-    const cdIdx = headers.indexOf('cas_date');
-    if(cdIdx>0) S.casDate[memberId]    = row[cdIdx]||null;
-    const mdIdx = headers.indexOf('manual_date');
-    if(mdIdx>0) S.manualDate[memberId] = row[mdIdx]||null;
+  if(!rows || rows.length < 2) return;
+  const headers = rows[0].map(h => (h||'').toLowerCase().trim());
+  const memberIdx = headers.indexOf('member');
+  if(memberIdx < 0) throw new Error('Sheet schema invalid: no "member" column found in portfolio tab');
+
+  const assetIds  = ASSET_CLASSES.map(a => a.id);
+  const memberIds = MEMBERS.map(m => m.id);
+
+  // Reject Pulls where required asset columns are entirely missing from the header —
+  // e.g. someone accidentally deleted a column; importing would zero out every member's value
+  const missingCols = assetIds.filter(id => !headers.includes(id));
+  if(missingCols.length > 0) {
+    throw new Error(
+      `Sheet schema invalid: required asset column(s) missing from portfolio tab: ${missingCols.join(', ')}.\n` +
+      `Fix the Sheet header or Push from the browser that has the correct data.`
+    );
   }
-  const luIdx = rows[0].findIndex(h=>h.toLowerCase()==='last_updated');
-  if(luIdx>0 && rows[1]) S.lastUpdated = rows[1][luIdx]||null;
+
+  // Build fresh state from Sheet (don't mutate existing S until all parsing passes)
+  const newAssets     = Object.fromEntries(memberIds.map(id => [id, ZERO()]));
+  const newCasLoaded  = Object.fromEntries(memberIds.map(id => [id, false]));
+  const newCasDate    = Object.fromEntries(memberIds.map(id => [id, null]));
+  const newManualDate = Object.fromEntries(memberIds.map(id => [id, null]));
+  let   newLastUpdated = null;
+
+  // Pre-compute the highest column index any asset lives at — rows shorter than this are truncated
+  const maxAssetColIdx = Math.max(-1, ...assetIds.map(id => headers.indexOf(id)));
+
+  const seen = new Set();
+  for(let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const memberId = ((row[memberIdx]||'')).toLowerCase().trim();
+    if(!memberId) continue;
+    if(!newAssets[memberId]) continue; // unknown member — skip
+    if(seen.has(memberId)) {
+      console.warn(`parseSheetPortfolio: duplicate member row "${memberId}" at row ${i+1}, skipping`);
+      continue;
+    }
+    seen.add(memberId);
+
+    // Reject truncated rows — a partial write could silently zero out trailing assets
+    if(maxAssetColIdx >= 0 && row.length <= maxAssetColIdx) {
+      console.warn(`parseSheetPortfolio: row for "${memberId}" is truncated (${row.length} cols, needs >${maxAssetColIdx}). Skipping incomplete row.`);
+      continue;
+    }
+
+    headers.forEach((h, j) => {
+      if(j === memberIdx) return;
+      if(!assetIds.includes(h)) return; // not an asset column
+      const cell = row[j]; // may be undefined (short row)
+      if(cell === undefined || cell === '') return; // explicit blank — leave as 0 from ZERO()
+      const v = parseFloat(cell);
+      // Corrupt numeric cell → abort the Pull rather than silently zero-ing the asset
+      if(isNaN(v)) throw new Error(
+        `Sheet data corrupt: "${cell}" is not a number for ${memberId}.${h}.\n` +
+        `Fix the value in Google Sheets or Push from the browser that has correct data.`
+      );
+      newAssets[memberId][h] = v < 0 ? 0 : v;
+    });
+
+    const clIdx = headers.indexOf('cas_loaded');
+    if(clIdx >= 0) newCasLoaded[memberId] = (row[clIdx]||'').toLowerCase() === 'true';
+    const cdIdx = headers.indexOf('cas_date');
+    if(cdIdx >= 0) newCasDate[memberId] = row[cdIdx] || null;
+    const mdIdx = headers.indexOf('manual_date');
+    if(mdIdx >= 0) newManualDate[memberId] = row[mdIdx] || null;
+  }
+
+  const luIdx = headers.indexOf('last_updated');
+  if(luIdx >= 0 && rows[1]) newLastUpdated = rows[1][luIdx] || null;
+
+  // All parsing passed — commit to S atomically
+  S.assets     = newAssets;
+  S.casLoaded  = newCasLoaded;
+  S.casDate    = newCasDate;
+  S.manualDate = newManualDate;
+  if(newLastUpdated) S.lastUpdated = newLastUpdated;
   updatePeriodBadge();
 }
 
-async function loadHistoryFromSheet() {
-  try {
-    const url = `${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_HISTORY}?key=${CONFIG.API_KEY}`;
-    const r = await fetch(url);
-    if(!r.ok) return;
-    const data = await r.json();
-    const rows = data.values||[];
-    if(rows.length<2) return;
-    S.history = rows.slice(1).map(row => ({
-      date:  row[0]||'',
-      total: parseFloat(row[1])||0,
-      note:  row[2]||'',
-    })).filter(h=>h.date&&h.total);
-  } catch(e) {}
+// Pure apply functions — take raw Sheet rows and commit to S (called only after all fetches succeed)
+function applyHistoryRows(rows) {
+  if(!rows || rows.length < 2) return;
+  S.history = rows.slice(1).map(row => ({
+    date:  row[0]||'',
+    total: parseFloat(row[1])||0,
+    note:  row[2]||'',
+  })).filter(h => h.date && h.total);
+}
+function applyConfigRows(rows) {
+  if(!rows || rows.length < 2) return;
+  rows.slice(1).forEach(row => {
+    const mid = (row[0]||'').toLowerCase().trim();
+    const pct = parseFloat(row[1]);
+    if(S.npsEqPct.hasOwnProperty(mid) && !isNaN(pct)) S.npsEqPct[mid] = pct;
+  });
 }
 
+// Fetch-and-apply versions used only by the old loadFromSheets path (now dead code).
+// refreshFromSheets uses the fetch-then-commit pattern instead.
+async function loadHistoryFromSheet() {
+  const url = `${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_HISTORY}?key=${CONFIG.API_KEY}`;
+  const r = await fetch(url);
+  if(!r.ok) throw new Error(`History HTTP ${r.status}`);
+  const data = await r.json();
+  applyHistoryRows(data.values || []);
+}
 async function loadConfigFromSheet() {
-  try {
-    const url = `${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_CONFIG}?key=${CONFIG.API_KEY}`;
-    const r = await fetch(url);
-    if(!r.ok) return;
-    const data = await r.json();
-    const rows = data.values||[];
-    rows.slice(1).forEach(row => {
-      const mid = (row[0]||'').toLowerCase().trim();
-      const pct = parseFloat(row[1]);
-      if(S.npsEqPct.hasOwnProperty(mid) && !isNaN(pct)) S.npsEqPct[mid] = pct;
-    });
-  } catch(e) {}
+  const url = `${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_CONFIG}?key=${CONFIG.API_KEY}`;
+  const r = await fetch(url);
+  if(!r.ok) throw new Error(`Config HTTP ${r.status}`);
+  const data = await r.json();
+  applyConfigRows(data.values || []);
 }
 
 /* ── OAUTH + WRITE ── */
 function loadGoogleOAuth() {
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
     if(window.google && window.google.accounts) { resolve(); return; }
     const s = document.createElement('script');
     s.src = 'https://accounts.google.com/gsi/client';
     s.onload = resolve;
+    s.onerror = () => reject(new Error('Could not load Google Identity Services. Check your internet connection.'));
     document.head.appendChild(s);
   });
 }
@@ -632,6 +744,10 @@ async function getOAuthToken() {
 async function writeToSheets() {
   const token = await getOAuthToken();
   const now = new Date().toLocaleString('en-IN', {timeZone:'Asia/Kolkata'});
+  // Collision-safe revision ID: ISO timestamp + random suffix prevents two browsers
+  // pushing within the same displayed second from creating a false "no conflict" match
+  const revId = new Date().toISOString() + '-' + Math.random().toString(36).slice(2, 8);
+
   // Build portfolio rows
   const assetIds = ASSET_CLASSES.map(a=>a.id);
   const headers = ['member', ...assetIds, 'cas_loaded', 'cas_date', 'manual_date', 'last_updated'];
@@ -640,54 +756,122 @@ async function writeToSheets() {
     const row = [m.id, ...assetIds.map(id=>S.assets[m.id][id]||0), S.casLoaded[m.id]?'TRUE':'FALSE', S.casDate[m.id]||'', S.manualDate[m.id]||'', ''];
     rows.push(row);
   });
-  rows[1][headers.length-1] = now; // last_updated on first member row only
+  rows[1][headers.length-1] = revId; // collision-safe revision stored in Sheet for conflict detection
 
-  const r1 = await fetch(`${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_PORTFOLIO}!A1?valueInputOption=RAW`, {
-    method: 'PUT',
-    headers: { 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
-    body: JSON.stringify({ values: rows })
-  });
-  if(!r1.ok) {
-    const errBody = await r1.json().catch(()=>({}));
-    throw new Error(`Portfolio write failed ${r1.status}: ${errBody?.error?.message||r1.statusText}`);
-  }
-
-  // Config rows
+  // Build config rows
   const configRows = [['member','nps_equity_pct'], ...MEMBERS.map(m=>[m.id, S.npsEqPct[m.id]])];
-  const r2 = await fetch(`${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_CONFIG}!A1?valueInputOption=RAW`, {
-    method: 'PUT',
+
+  // Write portfolio + config atomically in one request (values:batchUpdate)
+  const batchBody = {
+    valueInputOption: 'RAW',
+    data: [
+      { range: `${CONFIG.SHEET_PORTFOLIO}!A1`, values: rows },
+      { range: `${CONFIG.SHEET_CONFIG}!A1`,    values: configRows }
+    ]
+  };
+  const r = await fetch(`${SHEET_BASE}/${CONFIG.SHEET_ID}/values:batchUpdate`, {
+    method: 'POST',
     headers: { 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
-    body: JSON.stringify({ values: configRows })
+    body: JSON.stringify(batchBody)
   });
-  if(!r2.ok) {
-    const errBody = await r2.json().catch(()=>({}));
-    throw new Error(`Config write failed ${r2.status}: ${errBody?.error?.message||r2.statusText}`);
+  if(!r.ok) {
+    const errBody = await r.json().catch(()=>({}));
+    throw new Error(`Sheets write failed ${r.status}: ${errBody?.error?.message||r.statusText}`);
   }
 
-  S.lastUpdated = now;
+  S.lastUpdated   = revId; // ISO+random — badge extracts date portion; same value as in Sheet
+  S.sheetRevision = revId; // conflict detection: compare against Sheet's last_updated on next Push
   updatePeriodBadge();
   saveLocal();
 }
 
 async function appendHistoryToSheet(entry) {
   const token = await getOAuthToken();
-  await fetch(`${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_HISTORY}!A:C:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+  const r = await fetch(`${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_HISTORY}!A:C:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
     method: 'POST',
     headers: { 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
     body: JSON.stringify({ values: [[entry.date, entry.total, entry.note]] })
   });
+  if(!r.ok) {
+    const errBody = await r.json().catch(()=>({}));
+    throw new Error(`History append failed ${r.status}: ${errBody?.error?.message||r.statusText}`);
+  }
+}
+
+// Overwrites the entire history tab — used when updating an existing month's snapshot
+// so local and Sheet stay in sync (append-only would cause divergence on the next Pull).
+// Clears the sheet first so stale trailing rows left from a previous longer history are removed.
+async function writeHistoryToSheet() {
+  const token = await getOAuthToken();
+  // Step 1: clear existing data so stale trailing rows don't survive the rewrite
+  const clearR = await fetch(`${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_HISTORY}!A:C:clear`, {
+    method: 'POST',
+    headers: { 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
+  });
+  if(!clearR.ok) {
+    const errBody = await clearR.json().catch(()=>({}));
+    throw new Error(`History clear failed ${clearR.status}: ${errBody?.error?.message||clearR.statusText}`);
+  }
+  // Step 2: write all current history rows
+  const rows = [['date','total','note'], ...S.history.map(h=>[h.date, h.total, h.note||''])];
+  const r = await fetch(`${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_HISTORY}!A1?valueInputOption=RAW`, {
+    method: 'PUT',
+    headers: { 'Authorization':'Bearer '+token, 'Content-Type':'application/json' },
+    body: JSON.stringify({ values: rows })
+  });
+  if(!r.ok) {
+    const errBody = await r.json().catch(()=>({}));
+    throw new Error(`History write failed ${r.status}: ${errBody?.error?.message||r.statusText}`);
+  }
 }
 
 function updatePeriodBadge() {
   const el = document.getElementById('period-badge');
-  if(el) el.textContent = S.lastUpdated ? 'Saved '+S.lastUpdated.split(',')[0] : 'Not synced';
+  if(!el) return;
+  if(!S.lastUpdated) { el.textContent = 'Not synced'; return; }
+  // lastUpdated may be ISO+random (new format) or a locale string (old localStorage values)
+  const display = /^\d{4}-\d{2}-\d{2}T/.test(S.lastUpdated)
+    ? S.lastUpdated.substring(0, 10) // "2024-01-15" from ISO+random
+    : S.lastUpdated.split(',')[0];    // date part from legacy locale string
+  el.textContent = 'Saved ' + display;
 }
 
 async function pushToSheets(btn) {
+  if(syncInFlight) { alert('A sync is already in progress. Please wait.'); return; }
+  syncInFlight = true;
   const orig = btn.textContent;
   btn.textContent = '↑ Saving...';
   btn.disabled = true;
   try {
+    // Conflict check: fetch current Sheet revision before overwriting
+    if(S.sheetRevision) {
+      try {
+        const vUrl = `${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_PORTFOLIO}?key=${CONFIG.API_KEY}`;
+        const vr = await fetch(vUrl);
+        if(vr.ok) {
+          const vdata = await vr.json();
+          const vrows = vdata.values || [];
+          if(vrows.length > 1) {
+            const vhdrs = vrows[0].map(h=>(h||'').toLowerCase().trim());
+            const luIdx = vhdrs.indexOf('last_updated');
+            const sheetRev = luIdx >= 0 ? (vrows[1][luIdx] || null) : null;
+            if(sheetRev && sheetRev !== S.sheetRevision) {
+              btn.textContent = orig; btn.disabled = false; // restore UI so dialog is readable
+              // NOTE: syncInFlight stays true — lock remains held through the dialog
+              const go = confirm(
+                `⚠ Sheet was changed by another browser since your last sync!\n\n` +
+                `Sheet last updated: ${sheetRev}\n` +
+                `Your last sync:     ${S.sheetRevision}\n\n` +
+                `Pushing now will overwrite those changes.\n\n` +
+                `Click OK to overwrite anyway, or Cancel to Pull first.`
+              );
+              if(!go) { syncInFlight = false; return; }
+              btn.textContent = '↑ Saving...'; btn.disabled = true;
+            }
+          }
+        }
+      } catch(ve) { console.warn('Version check failed (non-fatal):', ve); }
+    }
     await writeToSheets();
     btn.textContent = '✓ Pushed';
     setTimeout(()=>{ btn.textContent=orig; btn.disabled=false; }, 2000);
@@ -697,35 +881,79 @@ async function pushToSheets(btn) {
     btn.style.color = 'var(--red)';
     setTimeout(()=>{ btn.textContent=orig; btn.disabled=false; btn.style.color=''; }, 3000);
     alert('Could not push to Sheets:\n\n'+e.message+'\n\nCheck: are you signed into Google (OAuth popup should appear), and is your internet connected?');
+  } finally {
+    syncInFlight = false;
   }
 }
 
 async function refreshFromSheets(btn) {
+  if(syncInFlight) { alert('A sync is already in progress. Please wait.'); return; }
+  syncInFlight = true;
   const orig = btn.textContent;
   btn.textContent = '↻ Loading...';
   btn.disabled = true;
   const warnEl = document.getElementById('sync-warn');
   try {
-    const url = `${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_PORTFOLIO}?key=${CONFIG.API_KEY}`;
-    const r = await fetch(url);
-    if(!r.ok) throw new Error(`HTTP ${r.status}`);
-    const data = await r.json();
-    if(!data.values || data.values.length < 2) throw new Error('Sheet is empty or has no data rows - make sure you have saved data at least once from this dashboard.');
-    parseSheetPortfolio(data.values);
-    await loadHistoryFromSheet();
-    await loadConfigFromSheet();
+    // Fetch all three tabs concurrently — must ALL succeed before we touch S
+    const key = `?key=${CONFIG.API_KEY}`;
+    const [pResp, hResp, cResp] = await Promise.all([
+      fetch(`${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_PORTFOLIO}${key}`),
+      fetch(`${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_HISTORY}${key}`),
+      fetch(`${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_CONFIG}${key}`),
+    ]);
+    if(!pResp.ok) throw new Error(`Portfolio tab: HTTP ${pResp.status}`);
+    if(!hResp.ok) throw new Error(`History tab: HTTP ${hResp.status}`);
+    if(!cResp.ok) throw new Error(`Config tab: HTTP ${cResp.status}`);
+
+    const [pData, hData, cData] = await Promise.all([pResp.json(), hResp.json(), cResp.json()]);
+
+    if(!pData.values || pData.values.length < 2) {
+      throw new Error('Portfolio Sheet is empty or has no data rows.\n\nThe Sheet has never been pushed to. Use ↑ Push from the browser with your correct data first.');
+    }
+
+    // Safety check: warn if Sheet total is far below local total
+    const localTotal = gTotal();
+    const assetIds = ASSET_CLASSES.map(a=>a.id);
+    const sheetHdr = (pData.values[0]||[]).map(h=>(h||'').toLowerCase().trim());
+    let sheetTotal = 0;
+    for(let i=1;i<pData.values.length;i++){
+      const row=pData.values[i];
+      sheetHdr.forEach((h,j)=>{ if(assetIds.includes(h)) sheetTotal+=parseFloat(row[j])||0; });
+    }
+    if(localTotal > 1000 && sheetTotal < localTotal * 0.1) {
+      btn.textContent = orig; btn.disabled = false; // restore UI so dialog is readable
+      // NOTE: syncInFlight stays true — lock remains held through the dialog
+      const go = confirm(
+        `⚠ Sheet data looks much lower than your local data!\n\n` +
+        `Local total:  ₹${formatIndian(localTotal)}\n` +
+        `Sheet total:  ₹${formatIndian(sheetTotal)}\n\n` +
+        `The Sheet may have old/incomplete data.\n` +
+        `Click Cancel and use ↑ Push instead to update the Sheet with your correct data.`
+      );
+      if(!go) { syncInFlight = false; return; }
+      btn.textContent = '↻ Loading...'; btn.disabled = true;
+    }
+
+    // All fetches succeeded and user confirmed — now commit to S
+    parseSheetPortfolio(pData.values);
+    applyHistoryRows(hData.values || []);
+    applyConfigRows(cData.values || []);
+    S.sheetRevision = S.lastUpdated; // track what we just pulled for conflict detection
+
     if(warnEl) warnEl.style.display='none';
     renderAll();
     saveLocal();
     btn.textContent = '✓ Synced';
     setTimeout(()=>{ btn.textContent=orig; btn.disabled=false; }, 2000);
   } catch(e) {
-    console.warn('Refresh failed:', e);
+    console.warn('Pull failed:', e);
     if(warnEl) { warnEl.style.display='inline-block'; warnEl.title=String(e); }
     btn.textContent = '✗ Failed';
     btn.style.color = 'var(--red)';
     setTimeout(()=>{ btn.textContent=orig; btn.disabled=false; btn.style.color=''; }, 3000);
-    alert('Could not load from Sheets:\n\n'+e.message+'\n\nCheck the browser console (F12 → Console) for details.');
+    alert('Could not load from Sheets:\n\n'+e.message+'\n\nCheck the browser console (F12 - Console) for details.');
+  } finally {
+    syncInFlight = false;
   }
 }
 
@@ -988,19 +1216,26 @@ function renderUpload() {
       try {
         const data = JSON.parse(e.target.result);
         const total = parseCASJson(data, mid);
+        saveLocal();
         statEl.innerHTML = `<div class="ok-msg">✓ Parsed ${mName}'s CAS - ${fmt(total)} total.</div>`;
         if(CONFIG.SHEET_ID !== 'YOUR_GOOGLE_SHEET_ID') {
-          statEl.innerHTML += '<div style="font-size:12px;color:var(--ink3);margin-top:4px"><span class="spinner"></span>Saving to Google Sheets...</div>';
-          try {
-            await writeToSheets();
-            statEl.innerHTML = `<div class="ok-msg">✓ ${mName}'s portfolio saved and synced. All family members will see the update.</div>`;
-          } catch(e) {
-            statEl.innerHTML += `<div class="err">Sheets sync failed: ${e}. Data saved locally.</div>`;
+          if(syncInFlight) {
+            statEl.innerHTML += `<div style="font-size:12px;color:var(--ink3);margin-top:4px">Sync in progress — CAS saved locally. Push manually when done.</div>`;
+          } else {
+            syncInFlight = true;
+            statEl.innerHTML += '<div style="font-size:12px;color:var(--ink3);margin-top:4px"><span class="spinner"></span>Saving to Google Sheets...</div>';
+            try {
+              await writeToSheets();
+              statEl.innerHTML = `<div class="ok-msg">✓ ${mName}'s portfolio saved and synced. All family members will see the update.</div>`;
+            } catch(e2) {
+              statEl.innerHTML += `<div class="err">Sheets sync failed: ${e2}. Data saved locally.</div>`;
+            } finally {
+              syncInFlight = false;
+            }
           }
         } else {
           statEl.innerHTML += '<div style="font-size:12px;color:var(--ink3);margin-top:4px">Google Sheets not configured - saved locally only.</div>';
         }
-        saveLocal();
         renderUpload();
       } catch(err) {
         statEl.innerHTML = `<div class="err">Could not parse file: ${err.message}. Make sure this is a casparser JSON output.</div>`;
@@ -1015,6 +1250,7 @@ function renderUpload() {
     const mName = MEMBERS.find(m=>m.id===mid).name;
     const statEl = document.getElementById('reset-status');
     if(!confirm(`Reset ALL data for ${mName}? This clears every asset value, CAS status, and manual entry for this member and syncs the change to Google Sheets. This cannot be undone.`)) return;
+    if(syncInFlight) { statEl.textContent = 'A sync is in progress. Please wait and try again.'; return; }
     // Wipe state for this member
     S.assets[mid] = ZERO();
     S.casLoaded[mid] = false;
@@ -1023,12 +1259,15 @@ function renderUpload() {
     saveLocal();
     statEl.textContent = 'Cleared locally.';
     if(CONFIG.SHEET_ID !== 'YOUR_GOOGLE_SHEET_ID') {
+      syncInFlight = true;
       statEl.innerHTML = '<span class="spinner"></span> Syncing to Google Sheets...';
       try {
         await writeToSheets();
         statEl.innerHTML = `<span style="color:var(--green)">✓ ${mName}'s data has been reset and synced to Sheets.</span>`;
       } catch(e) {
         statEl.innerHTML = `<span style="color:var(--red)">Cleared locally. Sheets sync failed: ${e}</span>`;
+      } finally {
+        syncInFlight = false;
       }
     } else {
       statEl.innerHTML = `<span style="color:var(--green)">✓ ${mName}'s data has been reset (locally only - Sheets not configured).</span>`;
@@ -1177,6 +1416,7 @@ function renderManual() {
     const errEl = document.getElementById('man-err'), statEl = document.getElementById('man-status');
     errEl.textContent=''; statEl.textContent='';
     if(raw===''||isNaN(val)||val<0) { errEl.textContent='Enter a valid amount.'; return; }
+    if(syncInFlight) { statEl.textContent='A sync is in progress. Please wait and try again.'; return; }
     S.assets[mid][aid] = val;
     S.manualDate[mid] = monthYear();
     const mName=MEMBERS.find(m=>m.id===mid).name, aName=ASSET_CLASSES.find(a=>a.id===aid).name;
@@ -1185,20 +1425,35 @@ function renderManual() {
     document.getElementById('man-value').value='';
     saveLocal();
     if(CONFIG.SHEET_ID !== 'YOUR_GOOGLE_SHEET_ID') {
+      syncInFlight = true;
       statEl.textContent='Saving...';
       try { await writeToSheets(); statEl.textContent=`✓ Saved: ${mName} - ${aName} → ${fmt(val)}${extra}`; }
       catch(e) { statEl.textContent=`✓ Saved locally. Sheets sync failed: ${e}`; }
+      finally { syncInFlight = false; }
     } else {
       statEl.textContent=`✓ Saved: ${mName} - ${aName} → ${fmt(val)}${extra}`;
     }
     renderManual();
   });
 
-  document.getElementById('man-clear').addEventListener('click', () => {
+  document.getElementById('man-clear').addEventListener('click', async () => {
     const mid=memberSel.value;
+    const mName=MEMBERS.find(m=>m.id===mid).name;
+    const statEl=document.getElementById('man-status');
+    if(!confirm(`Clear all manual entries for ${mName}?`)) return;
+    if(syncInFlight) { statEl.textContent='A sync is in progress. Please wait and try again.'; return; }
     MANUAL_IDS.forEach(k=>{S.assets[mid][k]=0;});
+    S.manualDate[mid]=null;
     saveLocal();
-    document.getElementById('man-status').textContent=`✓ Cleared manual entries for ${MEMBERS.find(m=>m.id===mid).name}.`;
+    if(CONFIG.SHEET_ID !== 'YOUR_GOOGLE_SHEET_ID') {
+      syncInFlight = true;
+      statEl.textContent='Clearing...';
+      try { await writeToSheets(); statEl.textContent=`✓ Manual entries cleared for ${mName} and synced to Sheets.`; }
+      catch(e) { statEl.textContent=`✓ Cleared locally. Sheets sync failed: ${e.message}`; }
+      finally { syncInFlight = false; }
+    } else {
+      statEl.textContent=`✓ Cleared manual entries for ${mName}.`;
+    }
     renderManual();
   });
 }
@@ -1239,9 +1494,18 @@ function renderHistory() {
     saveLocal();
     const statEl=document.getElementById('snap-status');
     if(CONFIG.SHEET_ID !== 'YOUR_GOOGLE_SHEET_ID') {
+      if(syncInFlight) { statEl.textContent='✓ Saved locally. (Sync in progress — push snapshot manually when done.)'; renderHistory(); return; }
+      syncInFlight = true;
       statEl.textContent='Saving...';
-      try { await appendHistoryToSheet(entry); statEl.textContent=`✓ Snapshot saved: ${fmt(entry.total)}`; }
-      catch(e) { statEl.textContent=`✓ Saved locally. Sheets sync failed.`; }
+      try {
+        if(existing>=0) {
+          await writeHistoryToSheet(); // update in place: overwrite whole tab so Sheet matches local
+        } else {
+          await appendHistoryToSheet(entry); // new entry: just append a row
+        }
+        statEl.textContent=`✓ Snapshot saved: ${fmt(entry.total)}`;
+      } catch(e) { statEl.textContent=`✓ Saved locally. Sheets sync failed.`; }
+      finally { syncInFlight = false; }
     } else {
       statEl.textContent=`✓ Snapshot saved: ${fmt(entry.total)}`;
     }
