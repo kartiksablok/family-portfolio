@@ -843,34 +843,74 @@ async function pushToSheets(btn) {
   btn.textContent = '↑ Saving...';
   btn.disabled = true;
   try {
-    // Conflict check: fetch current Sheet revision before overwriting
-    if(S.sheetRevision) {
-      try {
-        const vUrl = `${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_PORTFOLIO}?key=${CONFIG.API_KEY}`;
-        const vr = await fetch(vUrl);
-        if(vr.ok) {
-          const vdata = await vr.json();
-          const vrows = vdata.values || [];
-          if(vrows.length > 1) {
-            const vhdrs = vrows[0].map(h=>(h||'').toLowerCase().trim());
-            const luIdx = vhdrs.indexOf('last_updated');
-            const sheetRev = luIdx >= 0 ? (vrows[1][luIdx] || null) : null;
-            if(sheetRev && sheetRev !== S.sheetRevision) {
-              btn.textContent = orig; btn.disabled = false; // restore UI so dialog is readable
-              // NOTE: syncInFlight stays true — lock remains held through the dialog
-              const go = confirm(
-                `⚠ Sheet was changed by another browser since your last sync!\n\n` +
-                `Sheet last updated: ${sheetRev}\n` +
-                `Your last sync:     ${S.sheetRevision}\n\n` +
-                `Pushing now will overwrite those changes.\n\n` +
-                `Click OK to overwrite anyway, or Cancel to Pull first.`
-              );
-              if(!go) { syncInFlight = false; return; }
-              btn.textContent = '↑ Saving...'; btn.disabled = true;
-            }
+    // Safety check: always fetch Sheet before overwriting — regardless of whether we have a prior revision.
+    // This prevents a fresh browser (sheetRevision=null) from silently clobbering good Sheet data.
+    try {
+      const vUrl = `${SHEET_BASE}/${CONFIG.SHEET_ID}/values/${CONFIG.SHEET_PORTFOLIO}?key=${CONFIG.API_KEY}`;
+      const vr = await fetch(vUrl);
+      if(vr.ok) {
+        const vdata = await vr.json();
+        const vrows = vdata.values || [];
+        if(vrows.length > 1) {
+          const vhdrs = vrows[0].map(h=>(h||'').toLowerCase().trim());
+          const assetIds = ASSET_CLASSES.map(a=>a.id);
+
+          // Compute current Sheet total
+          const sheetTotal = vrows.slice(1).reduce((sum, row) => {
+            assetIds.forEach(id => {
+              const idx = vhdrs.indexOf(id);
+              if(idx >= 0) sum += parseFloat(row[idx]) || 0;
+            });
+            return sum;
+          }, 0);
+
+          // Seed our revision from Sheet if we never had one
+          const luIdx = vhdrs.indexOf('last_updated');
+          const sheetRev = luIdx >= 0 ? (vrows[1][luIdx] || null) : null;
+          if(!S.sheetRevision && sheetRev) S.sheetRevision = sheetRev;
+
+          // 1. Revision conflict: Sheet was updated by another browser since our last sync
+          if(S.sheetRevision && sheetRev && sheetRev !== S.sheetRevision) {
+            btn.textContent = orig; btn.disabled = false;
+            const go = confirm(
+              `⚠ Sheet was changed by another browser since your last sync!\n\n` +
+              `Sheet last updated: ${sheetRev}\n` +
+              `Your last sync:     ${S.sheetRevision}\n\n` +
+              `Pushing now will overwrite those changes.\n\n` +
+              `Click OK to overwrite anyway, or Cancel to Pull first.`
+            );
+            if(!go) { syncInFlight = false; return; }
+            btn.textContent = '↑ Saving...'; btn.disabled = true;
+          }
+
+          // 2. Total safety check: local data is significantly lower than Sheet
+          //    Catches the case where a fresh browser (no prior revision) pushes stale/tiny data
+          const localTotal = gTotal();
+          if(sheetTotal > 1000 && localTotal < sheetTotal * 0.5) {
+            btn.textContent = orig; btn.disabled = false;
+            const go = confirm(
+              `⚠ Your local data (${fmt(localTotal)}) is much lower than what's in the Sheet (${fmt(sheetTotal)}).\n\n` +
+              `Pushing now will OVERWRITE the Sheet with your lower values.\n\n` +
+              `Click Cancel and do ↓ Pull first if you want the Sheet data instead.\n` +
+              `Click OK only if you're sure your local data is correct.`
+            );
+            if(!go) { syncInFlight = false; return; }
+            btn.textContent = '↑ Saving...'; btn.disabled = true;
           }
         }
-      } catch(ve) { console.warn('Version check failed (non-fatal):', ve); }
+      }
+    } catch(ve) {
+      // Cannot verify Sheet state → abort. Proceeding blind risks overwriting good data.
+      btn.textContent = orig; btn.disabled = false;
+      syncInFlight = false;
+      alert(
+        `⚠ Could not verify the current Sheet data before pushing.\n\n` +
+        `Push aborted to protect against accidental overwrites.\n\n` +
+        `Check your internet connection and try again. If the problem persists, ` +
+        `use ↓ Pull first to confirm your local data matches the Sheet.\n\n` +
+        `(Error: ${ve.message})`
+      );
+      return;
     }
     await writeToSheets();
     btn.textContent = '✓ Pushed';
